@@ -46,7 +46,7 @@ const vazioNull = v => (v === undefined || v === null || String(v).trim() === ""
 
 /* ============================ banco (Supabase) ============================ */
 let usuario = null;
-const db = { config: {}, grupos: [], produtos: [], descritivos: [], clientes: [], contatos: [], enderecos: [], telefones: [], licencas: [], propostas: [], modelo: null, modeloInfo: null };
+const db = { config: {}, grupos: [], produtos: [], descritivos: [], clientes: [], contatos: [], enderecos: [], telefones: [], licencas: [], licenca_itens: [], propostas: [], modelo: null, modeloInfo: null };
 
 const CONFIG_PADRAO = {
   vendedorNome: "", vendedorFone: "", vendedorEmail: "", cidadeEmissao: "Curitiba/PR", filialAceite: "SKA Curitiba/PR", validadeDias: 22,
@@ -109,6 +109,7 @@ async function carregarTudo() {
       lerTudo("produto_descritivos", "*"), lerTudo("clientes", "*", "nome_fantasia"), lerTudo("contatos", "*", "nome"),
       lerTudo("enderecos", "*"), lerTudo("telefones", "*"), lerTudo("licencas", "*", "validade"), lerTudo("propostas", "*", "atualizado_em"),
     ]);
+    const itensLic = await lerTudo("licenca_itens", "*").catch(e => { console.warn("licenca_itens", e); return []; });
     const c = {}; for (const r of cfg) if (r.chave !== "modelo_docx") c[r.chave] = r.valor;
     db.config = Object.assign({}, CONFIG_PADRAO, c.proposta_padrao || {});
     db.retroatividade = c.retroatividade || null;
@@ -117,7 +118,7 @@ async function carregarTudo() {
     db.produtos = prods.map(prodDeRow);
     const porId = new Map(db.produtos.map(p => [p.id, p]));
     for (const v of vinc.sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) { const p = porId.get(v.produto_id); if (p) p.descritivos.push(v.descritivo_id); }
-    db.clientes = clis; db.contatos = cts; db.enderecos = ends; db.telefones = tels; db.licencas = lics;
+    db.clientes = clis; db.contatos = cts; db.enderecos = ends; db.telefones = tels; db.licencas = lics; db.licenca_itens = itensLic;
     db.propostas = props.reverse();
     const mod = cfg.find(r => r.chave === "modelo_docx");
     db.modeloInfo = mod ? { nome: (mod.valor && mod.valor.nome) || "modelo.docx", em: mod.atualizado_em } : null;
@@ -172,6 +173,14 @@ const contatosDe = id => db.contatos.filter(x => x.cliente_id === id);
 const enderecosDe = id => db.enderecos.filter(x => x.cliente_id === id).sort((a, b) => (b.principal ? 1 : 0) - (a.principal ? 1 : 0));
 const telefonesDe = id => db.telefones.filter(x => x.cliente_id === id);
 const licencasDe = id => db.licencas.filter(x => x.cliente_id === id);
+const itensDe = licId => db.licenca_itens.filter(x => x.licenca_id === licId);
+const licInativa = l => /inativ/i.test(l.status || "") || l.tipo_licenca === "Nenhum";
+function produtoDaLicenca(l) {
+  const its = itensDe(l.id);
+  if (its.length) return its.map(i => (i.quantidade > 1 ? i.quantidade + "x " : "") + (i.produto_texto || (db.produtos.find(p => p.id === i.produto_id) || {}).nome || "?")).join(" + ");
+  return l.produto_texto || (db.produtos.find(p => p.id === l.produto_id) || {}).nome || "";
+}
+function badgeStatusCrm(st) { if (!st) return ""; const c = /inativ/i.test(st) ? "b-cinza" : /vencid/i.test(st) ? "b-vermelho" : /oportun/i.test(st) ? "b-verde" : "b-azul"; return `<span class="badge ${c}" title="Status no CRM">${esc(st)}</span>`; }
 const cliPorId = id => db.clientes.find(c => c.id === id);
 const empresaDe = c => c.razao_social || c.nome_fantasia || "";
 function rotuloCliente(c) {
@@ -285,7 +294,7 @@ function renderAlertaCliente(c) {
   const av = [];
   if (c.suporte && !/verde/i.test(c.suporte)) av.push("Suporte: " + c.suporte);
   if (c.status_licenciamento && /inativo/i.test(c.status_licenciamento)) av.push("Licenciamento inativo");
-  const venc = licencasDe(c.id).map(situacaoLicenca).filter(s => s.cod === "vencida");
+  const venc = licencasDe(c.id).filter(l => !licInativa(l)).map(situacaoLicenca).filter(s => s.cod === "vencida");
   if (venc.length) av.push(`${venc.length} licença(s) vencida(s) — maior atraso: ${Math.max(...venc.map(s => s.meses))} mês(es)`);
   if (c.pontos_atencao) av.push(c.pontos_atencao);
   box.innerHTML = av.length ? `<div class="alerta-cli aviso" style="display:block"><b>Atenção:</b> ${av.map(esc).join(" · ")}</div>` : "";
@@ -808,47 +817,64 @@ function ligarListaProp() {
 
 /* ============================ renovações (licenças) ============================ */
 function renderRenovacoes() {
-  const f = $("#frSit").value, q = norm($("#frBusca").value);
+  const f = $("#frSit").value, q = norm($("#frBusca").value), fst = $("#frStatus").value, fti = $("#frTipo").value;
   const linhas = db.licencas.map(l => ({ l, s: situacaoLicenca(l), c: cliPorId(l.cliente_id) || {} }))
     .filter(({ l, s, c }) => {
+      if (fst === "" && licInativa(l)) return false;
+      if (fst === "inativas" && !licInativa(l)) return false;
+      if (fti && l.tipo_licenca !== fti) return false;
       if (f === "vencida" && s.cod !== "vencida") return false;
       if (f === "alerta" && !(s.cod === "vencida" || s.cod === "avencer")) return false;
       if (/^\d+$/.test(f) && !(s.dias !== null && s.dias >= 0 && s.dias <= +f)) return false;
-      return !q || norm([c.nome_fantasia, c.razao_social, c.cnpj_cpf, l.produto_texto, l.numero_serie, (db.produtos.find(p => p.id === l.produto_id) || {}).nome].join(" ")).includes(q);
+      return !q || norm([c.nome_fantasia, c.razao_social, c.cnpj_cpf, c.codigo_crm, l.cliente_crm_texto, l.numero_serie, l.fornecedor, produtoDaLicenca(l)].join(" ")).includes(q);
     })
     .sort((a, b) => (a.l.validade || "9999").localeCompare(b.l.validade || "9999"));
-  const nVenc = db.licencas.filter(l => situacaoLicenca(l).cod === "vencida").length, nAv = db.licencas.filter(l => situacaoLicenca(l).cod === "avencer").length;
-  $("#frInfo").textContent = `${db.licencas.length} licença(s) cadastrada(s) · ${nVenc} vencida(s) · ${nAv} vencem em até 90 dias`;
-  $("#listaRenov").innerHTML = linhas.length ? `<table class="lista"><thead><tr><th>Cliente</th><th>Produto</th><th>Nº de série</th><th>Qtde</th><th>Validade</th><th>Situação</th><th></th></tr></thead><tbody>${linhas.map(({ l, s, c }) => `
-    <tr data-l="${l.id}"><td><b>${esc(c.nome_fantasia || c.razao_social || "?")}</b> ${badgeSuporte(c.suporte)}</td>
-    <td>${esc(l.produto_texto || (db.produtos.find(p => p.id === l.produto_id) || {}).nome || "")}${l.tipo_licenca ? ` <span class="pill">${esc(l.tipo_licenca)}</span>` : ""}</td>
-    <td>${esc(l.numero_serie || "")}</td><td>${esc(l.quantidade)}</td><td>${dataBR(l.validade)}</td><td><span class="badge ${s.cls}">${esc(s.txt)}</span></td>
+  const ativas = db.licencas.filter(l => !licInativa(l));
+  const nVenc = ativas.filter(l => situacaoLicenca(l).cod === "vencida").length, nAv = ativas.filter(l => situacaoLicenca(l).cod === "avencer").length;
+  $("#frInfo").textContent = `${linhas.length} na lista · ${db.licencas.length} números de série no total (${db.licencas.length - ativas.length} inativos) · ${nVenc} vencidos · ${nAv} vencem em até 90 dias (sem contar inativos)`;
+  $("#listaRenov").innerHTML = linhas.length ? `<table class="lista"><thead><tr><th>Cliente</th><th>Nº de série / produto</th><th>Tipo</th><th>Qtde</th><th>Validade</th><th>Situação</th><th></th></tr></thead><tbody>${linhas.slice(0, 400).map(({ l, s, c }) => `
+    <tr data-l="${l.id}"><td><b>${esc(c.nome_fantasia || c.razao_social || l.cliente_crm_texto || "?")}</b> ${badgeSuporte(c.suporte)}</td>
+    <td><code>${esc(l.numero_serie || "")}</code>${l.fornecedor && l.fornecedor !== "SOLIDWORKS" ? ` <span class="pill">${esc(l.fornecedor)}</span>` : ""}<div class="dica" style="margin:0">${esc(produtoDaLicenca(l)) || "<i>produto não informado — cadastre os itens</i>"}</div></td>
+    <td>${esc(l.tipo_licenca || "")}${l.temporario ? ' <span class="pill">temp.</span>' : ""}</td><td>${esc(l.quantidade)}</td><td>${dataBR(l.validade)}</td><td><span class="badge ${s.cls}">${esc(s.txt)}</span> ${badgeStatusCrm(l.status)}</td>
     <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-ra="prop">Proposta</button> <button class="btn peq" data-ra="cli">Cliente</button></td></tr>`).join("")}</tbody></table>`
     : `<div class="vazio">${db.licencas.length ? "Nenhuma licença nessa situação." : "Nenhuma licença cadastrada ainda. Cadastre as licenças (nº de série e validade) dentro de cada cliente, na aba Clientes."}</div>`;
+  if (linhas.length > 400) $("#listaRenov").insertAdjacentHTML("beforeend", `<div class="vazio">Mostrando 400 de ${linhas.length}. Use a busca ou os filtros.</div>`);
 }
-function propostaDeLicenca(l) {
-  const c = cliPorId(l.cliente_id); if (!c) return;
-  const s = situacaoLicenca(l);
+function renovacaoDe(produtoId) {
+  const base = db.produtos.find(p => p.id === produtoId); if (!base) return null;
+  if (/Renovação/.test(base.tipo)) return base;
+  if (!base.familia) return null;
+  return db.produtos.find(p => p.ativo && p.familia === base.familia && p.tipo === "Renovação de subscription (ALC)" && (+p.anos || 1) === 1)
+    || db.produtos.find(p => p.ativo && p.familia === base.familia && /Renovação/.test(p.tipo)) || null;
+}
+function propostaDeLicenca(l, lista) {
+  const c = cliPorId(l.cliente_id); if (!c) return toast("Esta licença não está ligada a um cliente cadastrado.", true);
+  lista = lista && lista.length ? lista : [l];
   cur = novaProposta(); aplicarCliente(c);
-  cur.origem = s.cod === "vencida" ? "Vencida" : "Renovação";
+  const sits = lista.map(situacaoLicenca);
+  cur.origem = sits.some(s => s.cod === "vencida") ? "Vencida" : "Renovação";
   cur.tituloManual = true; cur.tituloCapa = `Renovação de subscription da empresa ${cur.cliente.empresa}`;
-  const base = db.produtos.find(p => p.id === l.produto_id);
-  const t = cur.tabelas[0];
-  let ren = null;
-  if (base && base.familia) ren = db.produtos.find(p => p.ativo && p.familia === base.familia && p.tipo === "Renovação de subscription (ALC)" && (+p.anos || 1) === 1)
-    || db.produtos.find(p => p.ativo && p.familia === base.familia && /Renovação/.test(p.tipo));
-  if (base && /Renovação/.test(base.tipo)) ren = ren || base;
-  if (ren) addProduto(t, ren, l.quantidade || 1);
-  else t.itens.push({ qtd: l.quantidade || 1, prodId: null, nome: "Renovação - " + (l.produto_texto || (base && base.nome) || "licença") + (l.numero_serie ? " (S/N " + l.numero_serie + ")" : ""), valor: 0, cortesia: false });
-  if (s.cod === "vencida") t.itens.push({ qtd: s.meses, prodId: null, nome: `Taxa de retroatividade - ${s.meses} ${s.meses > 1 ? "meses" : "mês"} vencido(s) (desde ${dataBR(l.validade)})`, valor: 0, cortesia: false });
-  salvarRascunho(); irAba("proposta"); renderProposta();
-  toast(s.cod === "vencida" ? `Licença vencida há ${s.meses} mês(es): confira o produto e preencha o valor da retroatividade.` : "Proposta de renovação criada — confira o produto e o valor.");
+  const t = cur.tabelas[0]; let semProduto = 0, retro = 0;
+  const linhaTexto = (txt, qtd, lic) => t.itens.push({ qtd, prodId: null, nome: "Renovação - " + txt + (lic.numero_serie ? " (S/N " + lic.numero_serie + ")" : ""), valor: 0, cortesia: false });
+  lista.forEach((lic, k) => {
+    const its = itensDe(lic.id);
+    if (its.length) for (const it of its) { const ren = renovacaoDe(it.produto_id); if (ren) addProduto(t, ren, it.quantidade || 1); else linhaTexto(it.produto_texto || (db.produtos.find(p => p.id === it.produto_id) || {}).nome || "item", it.quantidade || 1, lic); }
+    else { const ren = renovacaoDe(lic.produto_id); if (ren) addProduto(t, ren, lic.quantidade || 1); else { semProduto++; linhaTexto(lic.produto_texto || "licença " + (lic.tipo_licenca || ""), lic.quantidade || 1, lic); } }
+    const s = sits[k];
+    if (s.cod === "vencida") { retro++; t.itens.push({ qtd: s.meses, prodId: null, nome: `Taxa de retroatividade${lic.numero_serie ? " S/N " + lic.numero_serie : ""} - ${s.meses} ${s.meses > 1 ? "meses" : "mês"} vencido(s) desde ${dataBR(lic.validade)}`, valor: 0, cortesia: false }); }
+  });
+  mudou("tab"); salvarRascunho(); irAba("proposta"); renderProposta();
+  toast(`Proposta com ${lista.length} número(s) de série criada.` + (semProduto ? ` ${semProduto} sem produto cadastrado: ajuste o texto e o valor.` : "") + (retro ? " Preencha o valor da retroatividade." : ""));
 }
 function ligarRenovacoes() {
-  $("#frSit").addEventListener("change", renderRenovacoes); $("#frBusca").addEventListener("input", renderRenovacoes);
+  for (const id of ["#frSit", "#frStatus", "#frTipo"]) $(id).addEventListener("change", renderRenovacoes); $("#frBusca").addEventListener("input", renderRenovacoes);
   $("#listaRenov").addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return; const l = db.licencas.find(x => x.id === b.closest("[data-l]").dataset.l);
-    if (b.dataset.ra === "prop") propostaDeLicenca(l);
+    if (b.dataset.ra === "prop") {
+      const visiveis = $$("#listaRenov tr[data-l]").map(tr => db.licencas.find(x => x.id === tr.dataset.l)).filter(x => x && x.cliente_id === l.cliente_id && x.id !== l.id);
+      const juntar = visiveis.length && confirm(`Este cliente tem mais ${visiveis.length} número(s) de série nesta lista.\n\nOK = incluir todos na mesma proposta\nCancelar = só este`);
+      propostaDeLicenca(l, juntar ? [l, ...visiveis] : [l]);
+    }
     if (b.dataset.ra === "cli") { const c = cliPorId(l.cliente_id); if (c) modalCliente(c, "licencas"); }
   });
 }
@@ -879,7 +905,7 @@ const CAMPOS_CLIENTE = [
   ["nome_fantasia", "Nome fantasia", "texto", "span2"], ["codigo_crm", "Código CRM", "numero"], ["ativo", "Cadastro ativo", "bool"],
   ["razao_social", "Razão social", "texto", "span2"], ["cnpj_cpf", "CNPJ / CPF", "texto"], ["inscricao_estadual", "Inscrição estadual", "texto"],
   ["cidade", "Cidade", "texto"], ["uf", "UF", "texto"], ["site", "Site", "texto", "span2"],
-  ["classificacao", "Classificação", ["", "SMB", "Mid-Market", "Enterprise"]], ["nivel", "Nível", ["", "Ouro Plus", "Ouro", "Prata"]],
+  ["classificacao", "Classificação", ["", "SMB", "Mid-Market", "Enterprise"]], ["nivel", "Nível", ["", "Ouro Plus", "Ouro", "Ouro (novo)", "Prata", "Sem nível"]],
   ["status_licenciamento", "Status licenciamento", ["", "Ativo", "Inativo"]], ["suporte", "Suporte", ["", "Verde (liberado)", "Amarelo (restrição)", "Vermelho (bloqueado)", "Cinza (sem suporte)"]],
   ["em_risco_para", "Em risco para", "texto"], ["bloquear_suporte_para", "Bloquear suporte para", "texto"],
   ["pontos_atencao", "Pontos de atenção", "area", "span4"], ["observacoes", "Observações", "area", "span4"],
@@ -913,11 +939,12 @@ const SUB = {
   telefones: { titulo: "Telefones", campos: [["tipo", "Tipo", ["Comercial", "Celular", "Financeiro", "Outro"]], ["ddd", "DDD", "texto"], ["numero", "Número", "texto"], ["ramal", "Ramal", "texto"], ["observacoes", "Observações", "texto", "span2"]],
     novo: { tipo: "Comercial", ddi: "55" }, obrig: "numero",
     resumo: x => `<b>${esc(textoTelefone(x))}</b> <span class="dica">${esc([x.tipo, x.observacoes].filter(Boolean).join(" · "))}</span>` },
-  licencas: { titulo: "Licenças", campos: [["produto_texto", "Produto (como está no CRM)", "texto", "span2"], ["numero_serie", "Nº de série", "texto"], ["_produto", "Produto do catálogo (opcional — ajuda a sugerir a renovação)", "lista", "dlProdutos"],
-      ["quantidade", "Quantidade", "numero"], ["validade", "Validade (fim da subscription)", "data"], ["tipo_licenca", "Tipo", ["", "Local", "Em rede"]], ["fornecedor", "Fornecedor", "texto"],
-      ["status", "Status", "texto"], ["negocio", "Negócio", "texto"], ["temporario", "Temporária", "bool"], ["observacoes", "Observações", "area", "span4"]],
-    novo: { quantidade: 1, fornecedor: "Dassault Systèmes" }, obrig: "produto_texto",
-    resumo: x => { const s = situacaoLicenca(x); return `<b>${esc(x.produto_texto || (db.produtos.find(p => p.id === x.produto_id) || {}).nome || "")}</b> <span class="badge ${s.cls}">${esc(s.txt)}</span><div class="dica" style="margin:0">${esc([x.numero_serie && "S/N " + x.numero_serie, "Qtde " + (x.quantidade || 1), x.validade && "validade " + dataBR(x.validade), x.tipo_licenca].filter(Boolean).join(" · "))}</div>`; } },
+  licencas: { titulo: "Licenças (números de série)", campos: [["numero_serie", "Nº de série", "texto", "span2"], ["fornecedor", "Fornecedor", "texto"], ["tipo_licenca", "Tipo", ["", "Local", "Em rede", "Nenhum"]],
+      ["quantidade", "Quantidade", "numero"], ["inicio", "Início", "data"], ["validade", "Validade (fim da subscription)", "data"], ["temporario", "Temporária", "bool"],
+      ["status", "Status no CRM", ["", "Válido", "Válido e com oportunidade", "Vencido", "Vencido e com oportunidade", "Inativo"]], ["nivel", "Nível", ["", "Ouro", "Ouro (novo)", "Prata", "Sem nível"]], ["codigo_crm", "Código CRM", "numero"], ["chave_ativacao", "Chave de ativação", "texto"],
+      ["produto_texto", "Produto (se for licença de um produto só)", "texto", "span2"], ["_produto", "Produto do catálogo (opcional)", "lista", "dlProdutos"], ["negocio", "Negócio", "texto"], ["observacoes", "Observações", "area", "span4"]],
+    novo: { quantidade: 1, fornecedor: "SOLIDWORKS", tipo_licenca: "Local", status: "Válido" }, obrig: "numero_serie",
+    resumo: x => { const s = situacaoLicenca(x), n = itensDe(x.id).length; return `<b><code>${esc(x.numero_serie || "")}</code></b> <span class="badge ${s.cls}">${esc(s.txt)}</span> ${badgeStatusCrm(x.status)}<div class="dica" style="margin:0">${esc([x.fornecedor, x.tipo_licenca, "Qtde " + (x.quantidade ?? 1), x.validade && "validade " + dataBR(x.validade), x.temporario && "temporária", x.codigo_crm && "CRM " + x.codigo_crm].filter(Boolean).join(" · "))}</div><div style="margin-top:2px">${esc(produtoDaLicenca(x)) || '<span class="dica">sem produto informado</span>'}</div>`; } },
 };
 function renderSub(tabela, clienteId, editId) {
   const cfg = SUB[tabela], box = $(`#sub-${tabela}`); if (!box) return;
@@ -928,21 +955,57 @@ function renderSub(tabela, clienteId, editId) {
     return `<div class="sub-form" data-form="${x.id || ""}"><div class="grid g4">${cfg.campos.map(c => campoHtml("sf-", c, v[c[0]])).join("")}</div>
       <div class="rodape" style="margin-top:8px"><button class="btn peq" data-sa="cancelar">Cancelar</button><button class="btn peq pri" data-sa="salvar">Salvar</button></div></div>`;
   };
-  box.innerHTML = itens.map(x => editId === x.id ? form(x) : `<div class="sub-item" data-id="${x.id}"><div class="t">${cfg.resumo(x)}</div><button class="btn peq" data-sa="editar">Editar</button><button class="btn peq perigo" data-sa="excluir">✕</button></div>`).join("")
+  const ordenados = tabela === "licencas" ? [...itens].sort((a, b) => (licInativa(a) - licInativa(b)) || String(b.validade || "").localeCompare(String(a.validade || ""))) : itens;
+  box.innerHTML = ordenados.map(x => editId === x.id ? form(x) : `<div class="sub-item" data-id="${x.id}"${tabela === "licencas" && licInativa(x) ? ' style="opacity:.6"' : ""}><div class="t">${cfg.resumo(x)}</div>${tabela === "licencas" ? `<button class="btn peq" data-sa="itens">Itens (${itensDe(x.id).length})</button>` : ""}<button class="btn peq" data-sa="editar">Editar</button><button class="btn peq perigo" data-sa="excluir">✕</button></div>${tabela === "licencas" && itensAbertos.has(x.id) ? `<div class="sub-form" data-lic="${x.id}">${htmlItens(x.id)}</div>` : ""}`).join("")
     + (editId === "novo" ? form(Object.assign({}, cfg.novo)) : "")
     + (!itens.length && editId !== "novo" ? `<div class="dica">Nenhum registro.</div>` : "");
+}
+/* ---- sub-itens de um número de série (licença em rede = vários produtos) ---- */
+const itensAbertos = new Set(); let itemEditando = null;
+const CAMPOS_ITEM = [["_produto", "Produto do catálogo", "lista", "dlProdutos"], ["produto_texto", "Texto (como no CRM)", "texto"], ["quantidade", "Qtde", "numero"], ["validade", "Validade (se diferente)", "data"], ["observacoes", "Obs.", "texto"]];
+function htmlItens(licId) {
+  const its = itensDe(licId);
+  const form = it => `<div class="grid g4" style="margin:6px 0">${CAMPOS_ITEM.map(c => campoHtml("li-", c, c[0] === "_produto" ? ((db.produtos.find(p => p.id === it.produto_id) || {}).nome || "") : it[c[0]])).join("")}</div>
+    <div class="linha" style="justify-content:flex-end"><button class="btn peq" data-it="cancelar">Cancelar</button><button class="btn peq pri" data-it="salvar" data-item="${it.id || ""}">Salvar item</button></div>`;
+  return `<div style="font-weight:600;font-size:12px;color:var(--azul-esc);margin-bottom:4px">Produtos dentro deste número de série</div>`
+    + its.map(it => itemEditando === it.id ? form(it) : `<div class="sub-item"><div class="t">${it.quantidade}x ${esc(it.produto_texto || (db.produtos.find(p => p.id === it.produto_id) || {}).nome || "?")}${it.produto_id ? "" : ' <span class="pill" style="background:#fff6dd;color:#9a6700">sem produto do catálogo</span>'}${it.validade ? ` <span class="dica">validade ${dataBR(it.validade)}</span>` : ""}</div><button class="btn peq" data-it="editar" data-item="${it.id}">Editar</button><button class="btn peq perigo" data-it="excluir" data-item="${it.id}">✕</button></div>`).join("")
+    + (itemEditando === "novo" ? form({ quantidade: 1 }) : `<button class="btn peq" data-it="novo" style="margin-top:6px">+ Adicionar produto</button>`)
+    + `<div class="dica">Ligue cada item a um produto do catálogo para o sistema achar a renovação certa (mesma família) ao montar a proposta.</div>`;
+}
+async function acaoItem(b, licId) {
+  const a = b.dataset.it, iid = b.dataset.item;
+  if (a === "novo") itemEditando = "novo";
+  else if (a === "editar") itemEditando = iid;
+  else if (a === "cancelar") itemEditando = null;
+  else if (a === "excluir") { if (!confirm("Excluir este item?")) return false; if (!(await tentar(async () => { await apagar("licenca_itens", iid); return true; }))) return false; db.licenca_itens = db.licenca_itens.filter(x => x.id !== iid); }
+  else if (a === "salvar") {
+    const nm = $("#li-_produto").value.trim(), p = nm ? acharProduto(nm) : null;
+    if (nm && !p) { toast("Produto não encontrado no catálogo — escolha da lista ou deixe vazio e use o texto.", true); return false; }
+    const antigo = iid ? db.licenca_itens.find(x => x.id === iid) : null;
+    const row = Object.assign({}, antigo || { id: uuid(), licenca_id: licId });
+    for (const c of CAMPOS_ITEM) if (c[0] !== "_produto") row[c[0]] = lerCampo("li-", c);
+    row.produto_id = p ? p.id : null; if (!row.produto_texto && p) row.produto_texto = p.nome; if (!row.quantidade && row.quantidade !== 0) row.quantidade = 1;
+    if (!row.produto_texto) { toast("Escolha um produto do catálogo ou escreva o texto.", true); return false; }
+    delete row.criado_em;
+    const r = await tentar(() => gravar("licenca_itens", row)); if (!r) return false;
+    substituir(db.licenca_itens, r); itemEditando = null; toast("Item salvo.");
+  }
+  return true;
 }
 function ligarSub(tabela, clienteId) {
   const box = $(`#sub-${tabela}`), cfg = SUB[tabela];
   $(`[data-subnovo="${tabela}"]`).onclick = () => renderSub(tabela, clienteId, "novo");
   box.onclick = async e => {
+    const bi = e.target.closest("button[data-it]");
+    if (bi) { const lic = bi.closest("[data-lic]").dataset.lic; if (await acaoItem(bi, lic)) { renderSub(tabela, clienteId); renderRenovacoes(); } return; }
     const b = e.target.closest("button[data-sa]"); if (!b) return;
     const a = b.dataset.sa, item = b.closest("[data-id]"), fEl = b.closest("[data-form]");
+    if (a === "itens") { const id = item.dataset.id; if (itensAbertos.has(id)) itensAbertos.delete(id); else { itensAbertos.add(id); itemEditando = null; } return renderSub(tabela, clienteId); }
     if (a === "editar") return renderSub(tabela, clienteId, item.dataset.id);
     if (a === "cancelar") return renderSub(tabela, clienteId);
     if (a === "excluir") {
       if (!confirm("Excluir este registro?")) return;
-      if ((await tentar(async () => { await apagar(tabela, item.dataset.id); return true; }))) { db[tabela] = db[tabela].filter(x => x.id !== item.dataset.id); renderSub(tabela, clienteId); posAlteracaoCliente(); }
+      if ((await tentar(async () => { await apagar(tabela, item.dataset.id); return true; }))) { db[tabela] = db[tabela].filter(x => x.id !== item.dataset.id); if (tabela === "licencas") db.licenca_itens = db.licenca_itens.filter(x => x.licenca_id !== item.dataset.id); renderSub(tabela, clienteId); posAlteracaoCliente(); }
       return;
     }
     if (a === "salvar") {
@@ -950,7 +1013,7 @@ function ligarSub(tabela, clienteId) {
       const row = Object.assign({}, antigo || { id: uuid(), cliente_id: clienteId });
       for (const c of cfg.campos) if (c[0] !== "_produto") row[c[0]] = lerCampo("sf-", c);
       if (!row[cfg.obrig]) return toast("Preencha o campo obrigatório.", true);
-      if (tabela === "licencas") { const nm = $("#sf-_produto").value.trim(); const p = nm ? acharProduto(nm) : null; if (nm && !p) return toast("Produto do catálogo não encontrado — escolha da lista ou deixe vazio.", true); row.produto_id = p ? p.id : null; if (!row.quantidade) row.quantidade = 1; }
+      if (tabela === "licencas") { const nm = $("#sf-_produto").value.trim(); const p = nm ? acharProduto(nm) : null; if (nm && !p) return toast("Produto do catálogo não encontrado — escolha da lista ou deixe vazio.", true); row.produto_id = p ? p.id : null; if (row.quantidade == null) row.quantidade = 1; }
       if (tabela === "enderecos" && row.principal) for (const e2 of enderecosDe(clienteId)) if (e2.id !== row.id && e2.principal) { await tentar(() => gravar("enderecos", { ...e2, principal: false })); e2.principal = false; }
       delete row.criado_em;
       const r = await tentar(() => gravar(tabela, row));
