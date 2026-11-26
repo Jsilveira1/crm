@@ -267,9 +267,9 @@ function renderProposta() {
   $("#pBtnVerCli").style.display = c ? "" : "none";
   renderAlertaCliente(c);
   const cts = c ? contatosDe(c.id).filter(x => x.ativo !== false) : [];
-  const sel = $("#pContatoSel");
-  sel.style.display = cts.length ? "" : "none";
-  sel.innerHTML = `<option value="">Contatos (${cts.length})...</option>` + cts.map(x => `<option value="${x.id}" ${x.id === cur.cliente.contatoId ? "selected" : ""}>${esc(x.nome)}${x.decisor ? " ★" : ""}</option>`).join("");
+  $("#dlContatos").innerHTML = cts.map(x => `<option value="${esc(x.nome)}">${esc([x.decisor ? "★ decisor" : "", x.cargo, x.email].filter(Boolean).join(" · "))}</option>`).join("");
+  $("#pContato").placeholder = cts.length ? `Digite ou escolha um dos ${cts.length} contato(s) do cliente` : "Nome de quem pediu a proposta";
+  $("#pContatoInfo").textContent = !c ? "" : cts.length ? `${cts.length} contato(s) cadastrado(s) — apague o campo para ver a lista.` : "Cliente sem contatos cadastrados: digite o nome e use \"Salvar / atualizar no cadastro\" para gravá-lo.";
   $("#pNumero").value = cur.numero; $("#pData").value = cur.data; $("#pValidade").value = cur.validade;
   $("#pTitulo").value = tituloCapa(); $("#pCidadeEmissao").value = cur.cidadeEmissao;
   $("#pOrigem").innerHTML = ORIGENS.map(o => `<option ${o === cur.origem ? "selected" : ""}>${o}</option>`).join("");
@@ -394,8 +394,9 @@ function ligarProposta() {
     if (!c) return toast("Cliente não encontrado no cadastro.", true);
     aplicarCliente(c); e.target.value = ""; renderProposta(); salvarRascunho(); toast("Cliente carregado: " + (c.nome_fantasia || c.razao_social));
   });
-  $("#pContatoSel").addEventListener("change", e => {
-    const ct = db.contatos.find(x => x.id === e.target.value); if (!ct) return;
+  $("#pContato").addEventListener("change", e => {
+    const v = norm(e.target.value).trim(); if (!v || !cur.cliente.id) return;
+    const ct = contatosDe(cur.cliente.id).find(x => norm(x.nome) === v); if (!ct) { cur.cliente.contatoId = null; return salvarRascunho(); }
     Object.assign(cur.cliente, { contatoId: ct.id, contato: ct.nome, email: ct.email || cur.cliente.email, telefone: ct.telefone || ct.celular || cur.cliente.telefone });
     renderProposta(); salvarRascunho();
   });
