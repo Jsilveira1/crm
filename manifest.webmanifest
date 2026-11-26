@@ -1,0 +1,10 @@
+{
+  "name": "Propostas SKA",
+  "short_name": "Propostas SKA",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f9",
+  "theme_color": "#1d4f86",
+  "icons": [{ "src": "icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

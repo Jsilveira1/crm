@@ -1,0 +1,10 @@
+# Nunca enviar dados de clientes, backups ou planilhas para o repositório
+*.json
+!manifest.webmanifest
+*.xlsx
+*.xls
+*.csv
+*.docx
+*.doc
+*.sql
+.env*

@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1d4f86">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icone.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icone.svg">
+<title>Propostas SKA</title>
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<div id="login" class="login">
+  <form id="formLogin" class="login-box">
+    <img src="icone.svg" alt="" width="56" height="56">
+    <h1>Propostas SKA</h1>
+    <p class="dica" style="margin-top:-6px">Entre com o seu usuário do sistema.</p>
+    <label>E-mail</label><input type="email" id="lgEmail" autocomplete="username" required>
+    <label style="margin-top:10px">Senha</label><input type="password" id="lgSenha" autocomplete="current-password" required>
+    <button class="btn pri grande" style="width:100%;margin-top:16px" id="lgEntrar">Entrar</button>
+    <button type="button" class="btn-link" id="lgEsqueci">Esqueci a senha</button>
+    <div id="lgMsg" class="dica"></div>
+  </form>
+  <form id="formNovaSenha" class="login-box" style="display:none">
+    <h1>Definir nova senha</h1>
+    <label>Nova senha</label><input type="password" id="nsSenha" autocomplete="new-password" minlength="8" required>
+    <button class="btn pri grande" style="width:100%;margin-top:16px">Salvar senha</button>
+    <div id="nsMsg" class="dica"></div>
+  </form>
+</div>
+
+<div id="app" style="display:none">
+<header>
+  <h1>Propostas SKA</h1>
+  <nav id="nav">
+    <button data-aba="proposta" class="ativo">Nova proposta</button>
+    <button data-aba="propostas">Propostas</button>
+    <button data-aba="renovacoes">Renovações</button>
+    <button data-aba="clientes">Clientes</button>
+    <button data-aba="produtos">Produtos</button>
+    <button data-aba="descritivos">Descritivos</button>
+    <button data-aba="config">Configurações</button>
+  </nav>
+  <span id="usuario" class="usuario"></span>
+</header>
+
+<main>
+<div id="avisoErro"></div>
+<div id="avisoModelo"></div>
+
+<!-- ===================== PROPOSTA ===================== -->
+<section class="aba ativa" id="aba-proposta">
+  <div class="card">
+    <h2><span class="num">1</span>Cliente</h2>
+    <div class="linha" style="margin-bottom:12px">
+      <div class="cresce"><label>Selecionar cliente cadastrado</label>
+        <input id="pCliBusca" list="dlClientes" placeholder="Digite o nome fantasia, razão social ou CNPJ..."></div>
+      <div><label>ou buscar pelo CNPJ (Receita)</label>
+        <div class="linha"><input id="pCnpjBusca" placeholder="00.000.000/0000-00" style="width:190px" inputmode="numeric">
+        <button class="btn pri" id="pBtnCnpj">Buscar CNPJ</button></div></div>
+    </div>
+    <div id="pCliAlerta"></div>
+    <div class="grid g4">
+      <div class="span2"><label>Empresa (razão social)</label><input data-c="empresa"></div>
+      <div><label>CNPJ</label><input data-c="cnpj"></div>
+      <div><label>Telefone</label><input data-c="telefone" inputmode="tel"></div>
+      <div class="span2"><label>Para (contato)</label>
+        <div class="linha"><input data-c="contato" class="cresce"><select id="pContatoSel" style="display:none;width:auto;max-width:200px"></select></div></div>
+      <div class="span2"><label>E-mail</label><input data-c="email" inputmode="email"></div>
+      <div class="span2"><label>Endereço</label><input data-c="endereco" placeholder="Rua X, 100 - Sala 2 - Bairro"></div>
+      <div><label>Cidade</label><input data-c="cidade"></div>
+      <div><label>UF</label><input data-c="uf" maxlength="2"></div>
+    </div>
+    <div class="linha" style="margin-top:12px">
+      <button class="btn" id="pBtnSalvarCli">Salvar / atualizar no cadastro de clientes</button>
+      <button class="btn" id="pBtnVerCli" style="display:none">Abrir cadastro do cliente</button>
+      <span class="dica" id="pCliInfo"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">2</span>Dados da proposta</h2>
+    <div class="grid g4">
+      <div><label>Número da proposta</label><input id="pNumero" placeholder="453805-1"></div>
+      <div><label>Data</label><input type="date" id="pData"></div>
+      <div><label>Validade</label><input type="date" id="pValidade"></div>
+      <div><label>Prazo rápido</label>
+        <div class="linha"><button class="btn peq" data-val="7">+7</button><button class="btn peq" data-val="15">+15</button><button class="btn peq" data-val="22">+22</button><button class="btn peq" data-val="30">+30 dias</button></div></div>
+      <div class="span3"><label>Título da capa</label><input id="pTitulo"></div>
+      <div><label>Cidade da emissão</label><input id="pCidadeEmissao"></div>
+      <div><label>Tipo de proposta</label><select id="pOrigem"></select></div>
+      <div><label>Situação</label><select id="pSituacao"></select></div>
+    </div>
+    <div class="dica">A validade é usada na capa e no item "Validade da proposta". A data aparece na carta (pág. 2) e no aceite.</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">3</span>Investimento</h2>
+    <div class="linha" style="margin-bottom:12px">
+      <label class="chk"><input type="radio" name="modo" value="opcoes" checked><span>Tabelas como <b>opções</b> — o cliente escolhe uma (Opção 1, Opção 2...)</span></label>
+      <label class="chk"><input type="radio" name="modo" value="somatoria"><span>Tabelas <b>somadas</b> — mostra o total geral ao final</span></label>
+    </div>
+    <div id="pTabelas"></div>
+    <div class="linha">
+      <button class="btn pri" id="pBtnAddTab">+ Adicionar tabela</button>
+      <button class="btn" id="pBtnDupTab">Duplicar última tabela</button>
+    </div>
+    <div id="pSomaBox" class="tabela-prop" style="margin-top:14px;display:none">
+      <div class="corpo linha">
+        <div class="cresce"><b>Total geral (soma das tabelas): </b><span id="pTotalGeral"></span></div>
+        <div><label>Simular total geral em</label><div class="linha"><input type="number" id="pParcGeral" min="1" style="width:70px"> <span>x de <b id="pParcGeralVal"></b></span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">4</span>Descrição da solução</h2>
+    <div class="dica" style="margin:-6px 0 10px">Carregada automaticamente pelos produtos das tabelas. Desmarque o que não quiser, inclua outros descritivos e ajuste a ordem.</div>
+    <div id="pDescs"></div>
+    <div class="linha" style="margin-top:8px">
+      <div class="cresce"><select id="pDescAdd"></select></div>
+      <button class="btn" id="pBtnDescAdd">Incluir descritivo</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">5</span>Condições e seções opcionais</h2>
+    <div class="grid g2">
+      <div><label>Forma de pagamento</label><input id="pFormaPag"></div>
+      <div><label>Prazo de entrega (acesso ao software)</label><input id="pPrazo"></div>
+    </div>
+    <div class="linha" style="margin-top:12px;gap:22px">
+      <label class="chk"><input type="checkbox" id="pReq"> Incluir "Requisitos de sistema" (SOLIDWORKS)</label>
+      <label class="chk"><input type="checkbox" id="pMatriz"> Incluir "Matriz de recursos do SOLIDWORKS"</label>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== PROPOSTAS SALVAS ===================== -->
+<section class="aba" id="aba-propostas">
+  <div class="card">
+    <h2>Propostas</h2>
+    <div class="filtros">
+      <input class="busca" id="buscaProp" placeholder="Buscar por número ou cliente...">
+      <select id="fpropSit"></select>
+      <select id="fpropOrig"></select>
+    </div>
+    <div id="listaProp" class="rolar"></div>
+  </div>
+</section>
+
+<!-- ===================== RENOVAÇÕES ===================== -->
+<section class="aba" id="aba-renovacoes">
+  <div class="card">
+    <h2>Licenças: vencidas e a vencer</h2>
+    <div class="filtros">
+      <select id="frSit">
+        <option value="alerta">Vencidas + vencem em até 90 dias</option>
+        <option value="vencida">Só vencidas</option>
+        <option value="30">Vencem em até 30 dias</option>
+        <option value="60">Vencem em até 60 dias</option>
+        <option value="90">Vencem em até 90 dias</option>
+        <option value="todas">Todas as licenças</option>
+      </select>
+      <input class="busca" id="frBusca" placeholder="Buscar cliente, produto ou nº de série...">
+    </div>
+    <div class="dica" id="frInfo" style="margin:-4px 0 8px"></div>
+    <div id="listaRenov" class="rolar"></div>
+  </div>
+</section>
+
+<!-- ===================== CLIENTES ===================== -->
+<section class="aba" id="aba-clientes">
+  <div class="card">
+    <h2>Clientes</h2>
+    <div class="filtros">
+      <input class="busca" id="buscaCli" placeholder="Buscar por nome, razão social, CNPJ, cidade, código CRM...">
+      <select id="fcStatus"><option value="">Status: todos</option><option value="Ativo">Ativos</option><option value="Inativo">Inativos</option></select>
+      <select id="fcSuporte"><option value="">Suporte: todos</option></select>
+      <select id="fcNivel"><option value="">Nível: todos</option></select>
+      <button class="btn pri" id="btnNovoCli">+ Novo cliente</button>
+    </div>
+    <div class="dica" id="contCli" style="margin:-4px 0 8px"></div>
+    <div id="listaCli" class="rolar"></div>
+  </div>
+</section>
+
+<!-- ===================== PRODUTOS ===================== -->
+<section class="aba" id="aba-produtos">
+  <div class="card">
+    <h2>Produtos</h2>
+    <div class="filtros">
+      <input class="busca" id="buscaProd" placeholder="Buscar por várias palavras (ex.: premium 3 anos network)...">
+      <button class="btn pri" id="btnNovoProd">+ Novo produto</button>
+    </div>
+    <div class="filtros" id="fpFiltros"></div>
+    <div class="dica" id="contProd" style="margin:-4px 0 8px"></div>
+    <div id="listaProd" class="rolar"></div>
+  </div>
+  <div class="card">
+    <h2>Títulos de tabela (sugestões)</h2>
+    <div class="dica" style="margin:-6px 0 10px">Aparecem como sugestão no título de cada tabela de investimento. Um por linha.</div>
+    <textarea id="gruposTxt" rows="4"></textarea>
+    <div class="linha" style="margin-top:8px"><button class="btn" id="btnSalvarGrupos">Salvar títulos</button></div>
+  </div>
+</section>
+
+<!-- ===================== DESCRITIVOS ===================== -->
+<section class="aba" id="aba-descritivos">
+  <div class="card">
+    <h2>Descritivos da solução</h2>
+    <div class="linha" style="margin-bottom:10px">
+      <input class="busca" id="buscaDesc" placeholder="Buscar...">
+      <button class="btn pri" id="btnNovoDesc">+ Novo descritivo</button>
+    </div>
+    <div id="listaDesc" class="rolar"></div>
+  </div>
+</section>
+
+<!-- ===================== CONFIG ===================== -->
+<section class="aba" id="aba-config">
+  <div class="card">
+    <h2>Modelo Word da proposta</h2>
+    <p style="margin-top:0">O modelo é o documento original da SKA com marcadores como <code>{empresa}</code>, <code>{numero}</code>, <code>{validade}</code>. Ele fica guardado no banco (protegido pelo login), não no site. Para mudar textos institucionais, baixe o modelo, edite no Word <b>sem apagar os marcadores entre chaves</b> e carregue de volta.</p>
+    <div class="linha">
+      <button class="btn pri" id="btnModeloCarregar">Carregar modelo (.docx)</button>
+      <button class="btn" id="btnModeloBaixar">Baixar modelo atual</button>
+      <input type="file" id="fileModelo" accept=".docx" hidden>
+    </div>
+    <div class="dica" id="modeloInfo"></div>
+  </div>
+  <div class="card">
+    <h2>Responsável pela proposta</h2>
+    <div class="grid g3">
+      <div><label>Nome</label><input data-cfg="vendedorNome"></div>
+      <div><label>Telefone</label><input data-cfg="vendedorFone"></div>
+      <div><label>E-mail</label><input data-cfg="vendedorEmail"></div>
+      <div><label>Cidade de emissão padrão</label><input data-cfg="cidadeEmissao"></div>
+      <div><label>Unidade no aceite</label><input data-cfg="filialAceite"></div>
+      <div><label>Validade padrão (dias)</label><input type="number" data-cfg="validadeDias"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Padrões da proposta</h2>
+    <div class="grid g2">
+      <div class="span2"><label>Título da capa ({empresa} é substituído pelo nome do cliente)</label><input data-cfg="tituloCapa"></div>
+      <div><label>Forma de pagamento padrão</label><input data-cfg="formaPagamento"></div>
+      <div><label>Prazo de entrega padrão</label><input data-cfg="prazoEntrega"></div>
+      <div><label>Texto do valor total para item cortesia</label><input data-cfg="textoCortesia"></div>
+      <div><label>Desconto padrão (%)</label><input type="number" step="0.01" data-cfg="descontoPadrao"></div>
+      <div><label>Parcelas padrão</label><input type="number" data-cfg="parcelasPadrao"></div>
+      <div><label>Arredondamento da parcela</label>
+        <select data-cfg="arredondamento"><option value="cima">Para cima (centavo)</option><option value="normal">Normal</option></select></div>
+      <div class="linha" style="gap:22px">
+        <label class="chk"><input type="checkbox" data-cfg="reqPadrao"> Requisitos marcados por padrão</label>
+        <label class="chk"><input type="checkbox" data-cfg="matrizPadrao"> Matriz marcada por padrão</label>
+      </div>
+    </div>
+    <div class="dica">As alterações são gravadas no banco automaticamente.</div>
+  </div>
+  <div class="card">
+    <h2>Dados</h2>
+    <div class="linha">
+      <button class="btn" id="btnRecarregar">Recarregar dados do banco</button>
+      <button class="btn" id="btnBackup">Baixar cópia de segurança (.json)</button>
+      <button class="btn perigo" id="btnSair">Sair do sistema</button>
+    </div>
+    <div class="dica" id="dadosInfo"></div>
+  </div>
+</section>
+</main>
+
+<div class="barra-acao" id="barraAcao">
+  <span class="resumo" id="resumo"></span>
+  <button class="btn" id="btnNovaProp">Limpar / nova</button>
+  <button class="btn" id="btnSalvarProp">Salvar proposta</button>
+  <button class="btn pri grande" id="btnGerar">Gerar proposta (.docx)</button>
+</div>
+</div>
+
+<div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+<div id="carregando" class="carregando"><span class="spin escuro"></span> <span id="carregandoTxt">Carregando...</span></div>
+<div id="toast"></div>
+<datalist id="dlClientes"></datalist>
+<datalist id="dlProdutos"></datalist>
+<datalist id="dlNegocios"></datalist>
+<datalist id="dlLinhas"></datalist>
+<datalist id="dlSubgrupos"></datalist>
+<datalist id="dlGrupos"></datalist>
+
+<script src="libs/supabase.js"></script>
+<script src="libs/pizzip.min.js"></script>
+<script src="libs/docxtemplater.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
