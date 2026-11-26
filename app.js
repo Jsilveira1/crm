@@ -1017,11 +1017,131 @@ function modalCliente(c, focar) {
 function ligarClientes() {
   for (const id of ["#buscaCli", "#fcStatus", "#fcSuporte", "#fcNivel"]) $(id).addEventListener(id === "#buscaCli" ? "input" : "change", renderListaCli);
   $("#btnNovoCli").addEventListener("click", () => modalCliente(null));
+  $("#btnReceitaLote").addEventListener("click", modalReceitaLote);
   $("#listaCli").addEventListener("click", e => {
     const b = e.target.closest("button"); const tr = e.target.closest("[data-c-id]"); if (!tr) return;
     const c = cliPorId(tr.dataset.cId);
     if (b && b.dataset.ca === "usar") { cur = novaProposta(); aplicarCliente(c); salvarRascunho(); irAba("proposta"); renderProposta(); toast("Nova proposta para " + (c.nome_fantasia || c.razao_social)); }
     else modalCliente(c);
+  });
+}
+
+/* ============================ atualização em lote pela Receita (BrasilAPI) ============================ */
+const cmpTxt = s => norm(s).replace(/[^a-z0-9]/g, "");
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+async function receitaBruta(d) {
+  for (let tent = 0; tent < 6; tent++) {
+    let r;
+    try { r = await fetch("https://brasilapi.com.br/api/cnpj/v1/" + d); } catch (e) { await esperar(5000); continue; }
+    if (r.ok) return r.json();
+    if (r.status === 404 || r.status === 400) return { _erro: "CNPJ não encontrado na Receita" };
+    await esperar(r.status === 429 ? 20000 : 4000);
+  }
+  return { _erro: "consulta falhou (tente de novo mais tarde)" };
+}
+function propostaReceita(c, j, op) {
+  const tipo = j.descricao_tipo_de_logradouro || "";
+  const m = montaCliente({ empresa: j.razao_social, cnpj: j.cnpj, logradouro: (tipo && !norm(j.logradouro).startsWith(norm(tipo)) ? tipo + " " : "") + (j.logradouro || ""),
+    numero: j.numero, complemento: j.complemento, bairro: j.bairro, cep: j.cep, cidade: j.municipio, uf: j.uf, fone: j.ddd_telefone_1 });
+  const mud = [];
+  const add = (campo, rotulo, atual, novo) => { if (novo && cmpTxt(atual) !== cmpTxt(novo)) mud.push({ campo, rotulo, atual: atual || "", novo, on: true }); };
+  if (op.razao) add("razao_social", "Razão social", c.razao_social, m.empresa);
+  if (op.cidade) { add("cidade", "Cidade", c.cidade, m.cidade); add("uf", "UF", c.uf, m.uf); }
+  if (op.endereco) {
+    const e = enderecosDe(c.id)[0];
+    const novoEnd = [m.endereco, m._end.cep && "CEP " + m._end.cep].filter(Boolean).join(" · ");
+    const atualEnd = e ? [textoEndereco(e), e.cep && "CEP " + e.cep].filter(Boolean).join(" · ") : "";
+    if (m.endereco && cmpTxt(atualEnd) !== cmpTxt(novoEnd)) mud.push({ campo: "endereco", rotulo: "Endereço", atual: atualEnd, novo: novoEnd, end: m._end, on: true });
+  }
+  if (op.fone && m.telefone && !telefonesDe(c.id).length) mud.push({ campo: "telefone", rotulo: "Telefone (novo)", atual: "", novo: m.telefone, on: false });
+  const sit = j.descricao_situacao_cadastral || "";
+  if (op.situacao && sit && sit.toUpperCase() !== "ATIVA") {
+    const nota = `Receita: CNPJ ${sit.toUpperCase()}${j.data_situacao_cadastral ? " desde " + dataBR(j.data_situacao_cadastral) : ""}`;
+    if (!String(c.pontos_atencao || "").includes(nota)) mud.push({ campo: "pontos_atencao", rotulo: "Situação na Receita", atual: c.pontos_atencao || "", novo: nota, on: true, alerta: true });
+  }
+  return mud;
+}
+function modalReceitaLote() {
+  const est = { rodando: false, parar: false, feitos: 0, erros: [], res: [] };
+  abrirModal(`<h3>Atualizar clientes pela Receita Federal</h3>
+    <p style="margin-top:0">Consulta o CNPJ de cada cliente na Receita (BrasilAPI, gratuita) e mostra o que está <b>diferente</b> do cadastro. Nada é gravado antes de você revisar e clicar em <b>Aplicar</b>.
+    Como a Receita não usa acentos, textos iguais a menos de acentos/maiúsculas são mantidos como estão.</p>
+    <div class="grid g3">
+      <div><label>Quais clientes</label><select id="rlQuais"><option value="ativos">Só cadastros ativos</option><option value="todos">Todos</option><option value="filtro">Os da busca/filtro atual da lista</option></select></div>
+      <div class="span2"><label>O que comparar</label><div class="linha" style="gap:14px">
+        <label class="chk"><input type="checkbox" id="rlRazao" checked> Razão social</label>
+        <label class="chk"><input type="checkbox" id="rlEnd" checked> Endereço</label>
+        <label class="chk"><input type="checkbox" id="rlCid" checked> Cidade/UF</label>
+        <label class="chk"><input type="checkbox" id="rlSit" checked> Situação do CNPJ (baixada/inapta)</label>
+        <label class="chk"><input type="checkbox" id="rlFone"> Telefone (só se não tiver nenhum)</label></div></div>
+    </div>
+    <div class="linha" style="margin-top:12px"><button class="btn pri" id="rlIniciar">Consultar Receita</button><button class="btn" id="rlParar" disabled>Parar</button><span class="dica" id="rlProg"></span></div>
+    <div id="rlRes" class="rolar" style="margin-top:12px;max-height:55vh;overflow:auto"></div>
+    <div class="rodape"><span class="dica" id="rlInfo" style="margin-right:auto"></span><button class="btn" id="rlFechar">Fechar</button><button class="btn pri" id="rlAplicar" disabled>Aplicar marcadas</button></div>`);
+  $("#modal").style.maxWidth = "1100px";
+  const desenhar = () => {
+    const n = est.res.reduce((s, r) => s + r.mud.filter(m => m.on).length, 0);
+    $("#rlRes").innerHTML = est.res.length ? `<table class="lista"><thead><tr><th style="width:28px"></th><th>Cliente</th><th>Campo</th><th>Hoje no cadastro</th><th>Receita</th></tr></thead><tbody>${est.res.map((r, ri) => r.mud.map((m, mi) => `
+      <tr><td><input type="checkbox" data-rm="${ri}-${mi}" ${m.on ? "checked" : ""}></td><td>${mi === 0 ? `<b>${esc(r.c.nome_fantasia)}</b><div class="dica" style="margin:0">${esc(r.c.cnpj_cpf)}</div>` : ""}</td>
+      <td>${m.alerta ? `<span class="badge b-vermelho">${esc(m.rotulo)}</span>` : esc(m.rotulo)}</td><td style="color:var(--sub)">${esc(m.atual) || "<i>vazio</i>"}</td><td>${esc(m.novo)}</td></tr>`).join("")).join("")}</tbody></table>` : "";
+    if (est.erros.length) $("#rlRes").insertAdjacentHTML("beforeend", `<details style="margin-top:10px"><summary>${est.erros.length} CNPJ(s) com erro</summary>${est.erros.map(x => `<div class="dica">${esc(x)}</div>`).join("")}</details>`);
+    $("#rlInfo").textContent = est.res.length ? `${est.res.length} cliente(s) com diferenças · ${n} alteração(ões) marcada(s)` : "";
+    $("#rlAplicar").disabled = !n || est.rodando;
+  };
+  $("#rlFechar").onclick = () => { if (est.rodando && !confirm("A consulta ainda está em andamento. Fechar e perder o resultado?")) return; est.parar = true; fecharModal(); };
+  $("#rlRes").addEventListener("change", e => { const k = e.target.dataset.rm; if (!k) return; const [ri, mi] = k.split("-").map(Number); est.res[ri].mud[mi].on = e.target.checked; desenhar(); });
+  $("#rlParar").onclick = () => { est.parar = true; $("#rlParar").disabled = true; };
+  $("#rlIniciar").onclick = async () => {
+    const quais = $("#rlQuais").value;
+    const op = { razao: $("#rlRazao").checked, endereco: $("#rlEnd").checked, cidade: $("#rlCid").checked, situacao: $("#rlSit").checked, fone: $("#rlFone").checked };
+    let lista = quais === "filtro" ? $$("#listaCli tr[data-c-id]").map(tr => cliPorId(tr.dataset.cId)) : db.clientes.filter(c => quais === "todos" || c.ativo !== false);
+    lista = lista.filter(c => c && soDig(c.cnpj_cpf).length === 14);
+    if (!lista.length) return toast("Nenhum cliente com CNPJ nessa seleção.", true);
+    Object.assign(est, { rodando: true, parar: false, feitos: 0, erros: [], res: [] });
+    $("#rlIniciar").disabled = true; $("#rlParar").disabled = false; desenhar();
+    const inicio = Date.now();
+    for (const c of lista) {
+      if (est.parar) break;
+      const j = await receitaBruta(soDig(c.cnpj_cpf));
+      est.feitos++;
+      if (j._erro) est.erros.push(`${c.nome_fantasia} (${c.cnpj_cpf}): ${j._erro}`);
+      else { const mud = propostaReceita(c, j, op); if (mud.length) est.res.push({ c, mud }); }
+      const resta = Math.round((Date.now() - inicio) / est.feitos * (lista.length - est.feitos) / 60000);
+      if ($("#rlProg")) $("#rlProg").textContent = `${est.feitos} de ${lista.length} consultados${resta > 0 ? " · faltam ~" + resta + " min" : ""} — pode revisar enquanto consulta`;
+      if (est.feitos % 5 === 0 || est.feitos === lista.length) desenhar();
+      await esperar(600);
+    }
+    est.rodando = false;
+    if (!$("#rlIniciar")) return;
+    $("#rlIniciar").disabled = false; $("#rlIniciar").textContent = "Consultar de novo"; $("#rlParar").disabled = true;
+    $("#rlProg").textContent = `${est.feitos} de ${lista.length} consultados${est.parar ? " (parado)" : " — concluído"}.`; desenhar();
+  };
+  $("#rlAplicar").onclick = () => tentar(async () => {
+    const alvo = est.res.filter(r => r.mud.some(m => m.on));
+    if (!confirm(`Gravar as alterações marcadas em ${alvo.length} cliente(s)?`)) return;
+    $("#rlAplicar").disabled = true; let ok = 0;
+    try {
+      for (const r of alvo) {
+        const on = r.mud.filter(m => m.on), c = { ...cliPorId(r.c.id) }; delete c.criado_em; delete c.atualizado_em;
+        let mudouCli = false;
+        for (const m of on) {
+          if (["razao_social", "cidade", "uf"].includes(m.campo)) { c[m.campo] = m.novo; mudouCli = true; }
+          if (m.campo === "pontos_atencao") { c.pontos_atencao = [c.pontos_atencao, m.novo].filter(Boolean).join(" · "); mudouCli = true; }
+        }
+        if (mudouCli) substituir(db.clientes, await gravar("clientes", c));
+        const me = on.find(m => m.campo === "endereco");
+        if (me) {
+          const e = enderecosDe(c.id)[0], campos = Object.fromEntries(Object.entries(me.end).map(([k, v]) => [k, vazioNull(v)]));
+          substituir(db.enderecos, await gravar("enderecos", e ? { ...e, ...campos } : { id: uuid(), cliente_id: c.id, tipo: "Comercial", principal: true, ...campos }));
+        }
+        const mt = on.find(m => m.campo === "telefone");
+        if (mt) { const d = soDig(mt.novo); substituir(db.telefones, await gravar("telefones", { id: uuid(), cliente_id: c.id, tipo: "Comercial", ddd: d.slice(0, 2), numero: d.slice(2), observacoes: "Receita Federal" })); }
+        r.feito = true; ok++; $("#rlInfo").textContent = `Gravando... ${ok} de ${alvo.length}`;
+      }
+    } finally {
+      est.res = est.res.filter(r => !r.feito); desenhar(); preencherFiltrosCli(); posAlteracaoCliente();
+      toast(`${ok} cliente(s) atualizado(s) com os dados da Receita.`);
+    }
   });
 }
 
