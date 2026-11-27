@@ -110,6 +110,7 @@ async function carregarTudo() {
       lerTudo("enderecos", "*"), lerTudo("telefones", "*"), lerTudo("licencas", "*", "validade"), lerTudo("propostas", "*", "atualizado_em"),
     ]);
     const itensLic = await lerTudo("licenca_itens", "*").catch(e => { console.warn("licenca_itens", e); return []; });
+    const ativs = await lerTudo("atividades", "*").catch(e => { console.warn("atividades (rode 08_atividades.sql)", e); return null; });
     const c = {}; for (const r of cfg) if (r.chave !== "modelo_docx") c[r.chave] = r.valor;
     db.config = Object.assign({}, CONFIG_PADRAO, c.proposta_padrao || {});
     db.retroatividade = c.retroatividade || null;
@@ -118,7 +119,7 @@ async function carregarTudo() {
     db.produtos = prods.map(prodDeRow);
     const porId = new Map(db.produtos.map(p => [p.id, p]));
     for (const v of vinc.sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) { const p = porId.get(v.produto_id); if (p) p.descritivos.push(v.descritivo_id); }
-    db.clientes = clis; db.contatos = cts; db.enderecos = ends; db.telefones = tels; db.licencas = lics; db.licenca_itens = itensLic;
+    db.clientes = clis; db.contatos = cts; db.enderecos = ends; db.telefones = tels; db.licencas = lics; db.licenca_itens = itensLic; db.atividades = ativs;
     db.propostas = props.reverse();
     const mod = cfg.find(r => r.chave === "modelo_docx");
     db.modeloInfo = mod ? { nome: (mod.valor && mod.valor.nome) || "modelo.docx", em: mod.atualizado_em } : null;
@@ -887,11 +888,12 @@ function renderListaCli() {
     .sort((a, b) => (a.nome_fantasia || "").localeCompare(b.nome_fantasia || ""));
   const max = 300;
   $("#contCli").textContent = `${l.length} de ${db.clientes.length} cliente(s)` + (l.length > max ? ` — mostrando os ${max} primeiros, refine a busca` : "");
-  $("#listaCli").innerHTML = l.length ? `<table class="lista"><thead><tr><th>Cliente</th><th>CNPJ</th><th>Cidade</th><th>Situação</th><th></th></tr></thead><tbody>${l.slice(0, max).map(c => `
+  $("#listaCli").innerHTML = l.length ? `<table class="lista"><thead><tr><th>Cliente</th><th>CNPJ</th><th>Cidade</th><th>Licenças</th><th>Situação</th><th></th></tr></thead><tbody>${l.slice(0, max).map(c => { const r = resumoLicencasCliente(c.id); return `
     <tr data-c-id="${c.id}"><td><b>${esc(c.nome_fantasia)}</b>${c.razao_social ? `<div class="dica" style="margin:0">${esc(c.razao_social)}${c.codigo_crm ? " · CRM " + c.codigo_crm : ""}</div>` : ""}</td>
     <td style="white-space:nowrap">${esc(c.cnpj_cpf || "")}</td><td>${esc([c.cidade, c.uf].filter(Boolean).join(" - "))}</td>
+    <td style="white-space:nowrap">${r.ativas ? `${r.ativas} ativa(s)` : '<span class="dica">—</span>'}${r.venc ? ` <span class="badge b-vermelho">${r.venc} vencida(s)</span>` : ""}${r.av ? ` <span class="badge b-amarelo">${r.av} vence(m)</span>` : ""}${r.prox ? `<div class="dica" style="margin:0">próx.: ${dataBR(r.prox.validade)}</div>` : ""}</td>
     <td>${badgeSuporte(c.suporte)} ${badgeNivel(c.nivel)} ${c.status_licenciamento === "Inativo" ? '<span class="badge b-cinza">Inativo</span>' : ""}</td>
-    <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-ca="usar">Nova proposta</button> <button class="btn peq" data-ca="edit">Abrir</button></td></tr>`).join("")}</tbody></table>` : `<div class="vazio">Nenhum cliente.</div>`;
+    <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-ca="usar">Nova proposta</button> <button class="btn peq" data-ca="edit">Abrir ficha</button></td></tr>`; }).join("")}</tbody></table>` : `<div class="vazio">Nenhum cliente.</div>`;
 }
 function preencherFiltrosCli() {
   const sup = [...new Set(db.clientes.map(c => c.suporte).filter(Boolean))].sort();
@@ -915,6 +917,7 @@ function campoHtml(pref, [k, rot, tipo, cls], v) {
   const wrap = h => `<div class="${cls === "span4" ? "" : cls || ""}"${st}>${h}</div>`;
   if (tipo === "bool") return wrap(`<label>&nbsp;</label><label class="chk"><input type="checkbox" id="${id}" ${v ? "checked" : ""}> ${esc(rot)}</label>`);
   if (Array.isArray(tipo)) { const ops = [...tipo]; if (v && !ops.includes(v)) ops.push(v); return wrap(`<label>${esc(rot)}</label><select id="${id}">${ops.map(o => `<option value="${esc(o)}" ${o === (v || "") ? "selected" : ""}>${esc(o || "—")}</option>`).join("")}</select>`); }
+  if (tipo === "contato") { const cts = fichaId ? contatosDe(fichaId) : []; return wrap(`<label>${esc(rot)}</label><select id="${id}"><option value="">—</option>${cts.map(k => `<option value="${k.id}" ${k.id === v ? "selected" : ""}>${esc(k.nome)}${k.cargo ? " (" + esc(k.cargo) + ")" : ""}</option>`).join("")}</select>`); }
   if (tipo === "area") return wrap(`<label>${esc(rot)}</label><textarea id="${id}" rows="2" style="min-height:50px">${esc(v || "")}</textarea>`);
   if (tipo === "lista") return wrap(`<label>${esc(rot)}</label><input id="${id}" list="${cls}" value="${esc(v || "")}">`);
   const t = tipo === "numero" ? "number" : tipo === "data" ? "date" : "text";
@@ -946,19 +949,27 @@ const SUB = {
     novo: { quantidade: 1, fornecedor: "SOLIDWORKS", tipo_licenca: "Local", status: "Válido" }, obrig: "numero_serie",
     resumo: x => { const s = situacaoLicenca(x), n = itensDe(x.id).length; return `<b><code>${esc(x.numero_serie || "")}</code></b> <span class="badge ${s.cls}">${esc(s.txt)}</span> ${badgeStatusCrm(x.status)}<div class="dica" style="margin:0">${esc([x.fornecedor, x.tipo_licenca, "Qtde " + (x.quantidade ?? 1), x.validade && "validade " + dataBR(x.validade), x.temporario && "temporária", x.codigo_crm && "CRM " + x.codigo_crm].filter(Boolean).join(" · "))}</div><div style="margin-top:2px">${esc(produtoDaLicenca(x)) || '<span class="dica">sem produto informado</span>'}</div>`; } },
 };
+const TIPOS_ATIV = ["Ligação", "E-mail", "WhatsApp", "Reunião", "Visita", "Proposta enviada", "Follow-up", "Suporte", "Outro"];
+SUB.atividades = { titulo: "Atividades e histórico", campos: [["data", "Data", "data"], ["tipo", "Tipo", TIPOS_ATIV], ["contato_id", "Com quem", "contato", "span2"], ["descricao", "O que aconteceu", "area", "span4"],
+    ["proximo_passo", "Próximo passo", "texto", "span2"], ["proximo_data", "Data do retorno", "data"], ["concluido", "Retorno concluído", "bool"]],
+  novo: { data: hojeISO(), tipo: "Ligação", concluido: false }, obrig: "tipo",
+  resumo: x => { const ct = db.contatos.find(k => k.id === x.contato_id); const venc = x.proximo_data && !x.concluido && x.proximo_data < hojeISO();
+    return `<span class="dica">${dataBR(x.data)}</span> <span class="pill">${esc(x.tipo)}</span>${ct ? ` <span class="dica">com ${esc(ct.nome)}</span>` : ""}<div style="white-space:pre-wrap;margin-top:2px">${esc(x.descricao || "")}</div>${x.proximo_passo || x.proximo_data ? `<div style="margin-top:3px">➜ ${esc(x.proximo_passo || "retorno")} ${x.proximo_data ? `<span class="badge ${x.concluido ? "b-verde" : venc ? "b-vermelho" : "b-azul"}">${x.concluido ? "concluído" : dataBR(x.proximo_data)}</span>` : ""}</div>` : ""}`; } };
 function renderSub(tabela, clienteId, editId) {
   const cfg = SUB[tabela], box = $(`#sub-${tabela}`); if (!box) return;
-  const itens = db[tabela].filter(x => x.cliente_id === clienteId);
-  $(".cab .n", box.parentElement).textContent = `${cfg.titulo} (${itens.length})`;
+  const todos = (db[tabela] || []).filter(x => x.cliente_id === clienteId);
+  const itens = tabela === "licencas" && !licVerInativas ? todos.filter(x => !licInativa(x) || x.id === editId) : todos;
+  $(".cab .n", box.parentElement).textContent = tabela === "licencas" ? `${cfg.titulo} — ${todos.filter(x => !licInativa(x)).length} ativa(s)${todos.some(licInativa) ? `, ${todos.filter(licInativa).length} inativa(s)` : ""}` : `${cfg.titulo} (${itens.length})`;
   const form = (x) => {
     const v = Object.assign({}, x); if (tabela === "licencas") v._produto = (db.produtos.find(p => p.id === x.produto_id) || {}).nome || "";
     return `<div class="sub-form" data-form="${x.id || ""}"><div class="grid g4">${cfg.campos.map(c => campoHtml("sf-", c, v[c[0]])).join("")}</div>
       <div class="rodape" style="margin-top:8px"><button class="btn peq" data-sa="cancelar">Cancelar</button><button class="btn peq pri" data-sa="salvar">Salvar</button></div></div>`;
   };
-  const ordenados = tabela === "licencas" ? [...itens].sort((a, b) => (licInativa(a) - licInativa(b)) || String(b.validade || "").localeCompare(String(a.validade || ""))) : itens;
-  box.innerHTML = ordenados.map(x => editId === x.id ? form(x) : `<div class="sub-item" data-id="${x.id}"${tabela === "licencas" && licInativa(x) ? ' style="opacity:.6"' : ""}><div class="t">${cfg.resumo(x)}</div>${tabela === "licencas" ? `<button class="btn peq" data-sa="itens">Itens (${itensDe(x.id).length})</button>` : ""}<button class="btn peq" data-sa="editar">Editar</button><button class="btn peq perigo" data-sa="excluir">✕</button></div>${tabela === "licencas" && itensAbertos.has(x.id) ? `<div class="sub-form" data-lic="${x.id}">${htmlItens(x.id)}</div>` : ""}`).join("")
+  const ordenados = tabela === "licencas" ? [...itens].sort((a, b) => (licInativa(a) - licInativa(b)) || String(a.validade || "9").localeCompare(String(b.validade || "9")))
+    : tabela === "atividades" ? [...itens].sort((a, b) => String(b.data).localeCompare(String(a.data)) || String(b.criado_em || "").localeCompare(String(a.criado_em || ""))) : itens;
+  box.innerHTML = ordenados.map(x => editId === x.id ? form(x) : `<div class="sub-item" data-id="${x.id}"${tabela === "licencas" && licInativa(x) ? ' style="opacity:.6"' : ""}><div class="t">${cfg.resumo(x)}</div>${tabela === "licencas" ? `<button class="btn peq" data-sa="itens">Itens (${itensDe(x.id).length})</button><button class="btn peq" data-sa="propor" title="Proposta de renovação deste número de série">Proposta</button>` : ""}${tabela === "atividades" && x.proximo_data && !x.concluido ? `<button class="btn peq" data-sa="concluir">✓ Concluir</button>` : ""}<button class="btn peq" data-sa="editar">Editar</button><button class="btn peq perigo" data-sa="excluir">✕</button></div>${tabela === "licencas" && itensAbertos.has(x.id) ? `<div class="sub-form" data-lic="${x.id}">${htmlItens(x.id)}</div>` : ""}`).join("")
     + (editId === "novo" ? form(Object.assign({}, cfg.novo)) : "")
-    + (!itens.length && editId !== "novo" ? `<div class="dica">Nenhum registro.</div>` : "");
+    + (!itens.length && editId !== "novo" ? `<div class="dica">${tabela === "licencas" && todos.length ? "Só há licenças inativas — marque \"mostrar inativas\"." : "Nenhum registro."}</div>` : "");
 }
 /* ---- sub-itens de um número de série (licença em rede = vários produtos) ---- */
 const itensAbertos = new Set(); let itemEditando = null;
@@ -1001,6 +1012,8 @@ function ligarSub(tabela, clienteId) {
     const b = e.target.closest("button[data-sa]"); if (!b) return;
     const a = b.dataset.sa, item = b.closest("[data-id]"), fEl = b.closest("[data-form]");
     if (a === "itens") { const id = item.dataset.id; if (itensAbertos.has(id)) itensAbertos.delete(id); else { itensAbertos.add(id); itemEditando = null; } return renderSub(tabela, clienteId); }
+    if (a === "propor") { const l = db.licencas.find(x => x.id === item.dataset.id); fecharModal(); return propostaDeLicenca(l, [l]); }
+    if (a === "concluir") { const at = db.atividades.find(x => x.id === item.dataset.id); const r = await tentar(() => gravar("atividades", { ...at, concluido: true })); if (r) { substituir(db.atividades, r); renderSub(tabela, clienteId); posAlteracaoCliente(); } return; }
     if (a === "editar") return renderSub(tabela, clienteId, item.dataset.id);
     if (a === "cancelar") return renderSub(tabela, clienteId);
     if (a === "excluir") {
@@ -1013,6 +1026,7 @@ function ligarSub(tabela, clienteId) {
       const row = Object.assign({}, antigo || { id: uuid(), cliente_id: clienteId });
       for (const c of cfg.campos) if (c[0] !== "_produto") row[c[0]] = lerCampo("sf-", c);
       if (!row[cfg.obrig]) return toast("Preencha o campo obrigatório.", true);
+      if (tabela === "atividades") { if (!row.data) row.data = hojeISO(); if (!row.usuario_id && usuario) row.usuario_id = usuario.id; if (!row.descricao && !row.proximo_passo) return toast("Descreva o que aconteceu ou o próximo passo.", true); }
       if (tabela === "licencas") { const nm = $("#sf-_produto").value.trim(); const p = nm ? acharProduto(nm) : null; if (nm && !p) return toast("Produto do catálogo não encontrado — escolha da lista ou deixe vazio.", true); row.produto_id = p ? p.id : null; if (row.quantidade == null) row.quantidade = 1; }
       if (tabela === "enderecos" && row.principal) for (const e2 of enderecosDe(clienteId)) if (e2.id !== row.id && e2.principal) { await tentar(() => gravar("enderecos", { ...e2, principal: false })); e2.principal = false; }
       delete row.criado_em;
@@ -1021,21 +1035,138 @@ function ligarSub(tabela, clienteId) {
     }
   };
 }
-function posAlteracaoCliente() { renderListaCli(); renderRenovacoes(); renderDatalists(); if (cur.cliente.id) renderAlertaCliente(cliPorId(cur.cliente.id)); }
+function posAlteracaoCliente() { renderListaCli(); renderRenovacoes(); renderDatalists(); if (cur.cliente.id) renderAlertaCliente(cliPorId(cur.cliente.id)); try { atualizarFicha(); } catch (e) { console.warn(e); } }
+/* ============================ ficha do cliente (CRM) ============================ */
+let fichaId = null, fichaAba = "resumo", licVerInativas = false;
+const atividadesDe = id => (db.atividades || []).filter(x => x.cliente_id === id);
+const propostasDe = id => db.propostas.filter(p => p.cliente_id === id);
+const linkTel = t => soDig(t).length >= 10 ? `<a href="tel:+55${soDig(t)}" title="Ligar">📞 ${esc(t)}</a>` : esc(t || "");
+const linkZap = t => soDig(t).length >= 10 ? ` <a href="https://wa.me/55${soDig(t)}" target="_blank" rel="noopener" title="Abrir conversa no WhatsApp">WhatsApp</a>` : "";
+const linkMail = e => e ? `<a href="mailto:${esc(e)}" title="Escrever e-mail">✉ ${esc(e)}</a>` : "";
+function resumoLicencasCliente(id) {
+  const ls = licencasDe(id), at = ls.filter(l => !licInativa(l));
+  const s = at.map(situacaoLicenca);
+  const venc = s.filter(x => x.cod === "vencida").length, av = s.filter(x => x.cod === "avencer").length;
+  const prox = at.filter(l => l.validade && l.validade >= hojeISO()).sort((a, b) => a.validade.localeCompare(b.validade))[0];
+  return { total: ls.length, ativas: at.length, inativas: ls.length - at.length, venc, av, prox, rede: at.filter(l => l.tipo_licenca === "Em rede").length, postos: at.reduce((t, l) => t + (+l.quantidade || 0), 0) };
+}
+function htmlKpis(c) {
+  const r = resumoLicencasCliente(c.id), ps = propostasDe(c.id), abertas = ps.filter(p => ["Rascunho", "Enviada", "Em negociação"].includes(p.situacao));
+  const ganhas = ps.filter(p => p.situacao === "Ganha"), ats = atividadesDe(c.id).sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  const pend = atividadesDe(c.id).filter(a => a.proximo_data && !a.concluido).sort((a, b) => a.proximo_data.localeCompare(b.proximo_data))[0];
+  const k = (n, rot, sub, cls) => `<div class="kpi ${cls || ""}"><b>${n}</b><span>${rot}</span>${sub ? `<small>${sub}</small>` : ""}</div>`;
+  return `<div class="kpis">
+    ${k(r.ativas, "nº de série ativos", `${r.postos} posto(s) · ${r.rede} em rede` + (r.inativas ? ` · ${r.inativas} inativo(s)` : ""))}
+    ${k(r.venc, "vencidos", r.venc ? "cobrar retroatividade" : "nenhum", r.venc ? "k-verm" : "")}
+    ${k(r.av, "vencem em 90 dias", r.prox ? "próxima: " + dataBR(r.prox.validade) : "—", r.av ? "k-amar" : "")}
+    ${k(abertas.length, "propostas em aberto", abertas.length ? fmtBRL(abertas.reduce((t, p) => t + (+p.total || 0), 0)) : `${ps.length} no total`)}
+    ${k(ganhas.length, "propostas ganhas", ganhas.length ? fmtBRL(ganhas.reduce((t, p) => t + (+p.total || 0), 0)) : "—", ganhas.length ? "k-verde" : "")}
+    ${k(ats[0] ? dataBR(ats[0].data) : "—", "último contato", pend ? `retorno ${dataBR(pend.proximo_data)}` : "sem retorno agendado", pend && pend.proximo_data < hojeISO() ? "k-verm" : "")}
+  </div>`;
+}
+function htmlResumo(c) {
+  const alertas = [];
+  if (c.suporte && !/verde/i.test(c.suporte)) alertas.push("Suporte: " + c.suporte);
+  if (c.pontos_atencao) alertas.push(c.pontos_atencao);
+  if (c.ativo === false) alertas.push("Cadastro inativo");
+  const ls = licencasDe(c.id).filter(l => !licInativa(l)).sort((a, b) => String(a.validade || "9").localeCompare(String(b.validade || "9")));
+  const cts = contatosDe(c.id).filter(x => x.ativo !== false).sort((a, b) => (b.decisor ? 1 : 0) - (a.decisor ? 1 : 0)).slice(0, 4);
+  const pend = atividadesDe(c.id).filter(a => a.proximo_data && !a.concluido).sort((a, b) => a.proximo_data.localeCompare(b.proximo_data));
+  const ults = atividadesDe(c.id).sort((a, b) => String(b.data).localeCompare(String(a.data))).slice(0, 4);
+  const ps = propostasDe(c.id).slice(0, 5);
+  const end = enderecosDe(c.id)[0];
+  const bloco = (tit, aba, corpo) => `<div class="card-mini"><div class="cm-cab"><b>${tit}</b>${aba ? `<button class="btn-link" data-ir="${aba}">ver tudo</button>` : ""}</div>${corpo}</div>`;
+  return (alertas.length ? `<div class="aviso" style="display:block"><b>Atenção:</b> ${alertas.map(esc).join(" · ")}</div>` : "")
+    + `<div class="resumo-grid">`
+    + bloco("Licenças ativas", "licencas", ls.length ? `<table class="lista"><tbody>${ls.slice(0, 6).map(l => { const s = situacaoLicenca(l); return `<tr><td><code>${esc(l.numero_serie || "")}</code><div class="dica" style="margin:0">${esc(produtoDaLicenca(l) || (l.tipo_licenca || ""))}</div></td><td class="num-r">${esc(l.quantidade)}x</td><td><span class="badge ${s.cls}">${esc(s.txt)}</span></td></tr>`; }).join("")}</tbody></table>${ls.length > 6 ? `<div class="dica">+ ${ls.length - 6} outra(s)</div>` : ""}` : `<div class="dica">Nenhuma licença ativa.</div>`)
+    + bloco("Contatos", "contatos", cts.length ? cts.map(x => `<div class="cont-mini"><b>${esc(x.nome)}</b>${x.decisor ? ' <span class="badge b-amarelo">decisor</span>' : ""}${x.cargo ? ` <span class="dica">${esc(x.cargo)}</span>` : ""}<div>${[linkMail(x.email), x.telefone ? linkTel(x.telefone) : "", x.celular ? linkTel(x.celular) + linkZap(x.celular) : ""].filter(Boolean).join(" · ")}</div></div>`).join("") : `<div class="dica">Nenhum contato. <button class="btn-link" data-ir="contatos" data-novo="contatos">Cadastrar</button></div>`)
+    + bloco("Próximos passos", "atividades", pend.length ? pend.slice(0, 5).map(a => `<div class="cont-mini"><span class="badge ${a.proximo_data < hojeISO() ? "b-vermelho" : a.proximo_data === hojeISO() ? "b-amarelo" : "b-azul"}">${dataBR(a.proximo_data)}</span> ${esc(a.proximo_passo || a.descricao || a.tipo)}</div>`).join("") : `<div class="dica">Nenhum retorno agendado.</div>`)
+    + bloco("Últimas atividades", "atividades", ults.length ? ults.map(a => `<div class="cont-mini"><span class="dica">${dataBR(a.data)}</span> <span class="pill">${esc(a.tipo)}</span> ${esc((a.descricao || "").slice(0, 120))}</div>`).join("") : `<div class="dica">Nenhuma atividade registrada.</div>`)
+    + bloco("Propostas", "propostas", ps.length ? ps.map(p => `<div class="cont-mini"><b>${esc(p.numero || "—")}</b> <span class="badge ${corSituacao(p.situacao)}">${esc(p.situacao)}</span> <span class="dica">${dataBR(p.data)} · ${fmtBRL(p.total)}</span></div>`).join("") : `<div class="dica">Nenhuma proposta.</div>`)
+    + bloco("Empresa", "dados", `<div class="cont-mini">${esc(c.razao_social || "")}<div class="dica" style="margin:0">${esc([c.cnpj_cpf, c.inscricao_estadual && "IE " + c.inscricao_estadual, c.classificacao].filter(Boolean).join(" · "))}</div></div>${end ? `<div class="cont-mini">${esc(textoEndereco(end))}<div class="dica" style="margin:0">${esc([end.cep && "CEP " + end.cep, [end.cidade || c.cidade, end.uf || c.uf].filter(Boolean).join(" - ")].filter(Boolean).join(" · "))}</div></div>` : ""}${telefonesDe(c.id).map(t => `<div class="cont-mini">${linkTel(textoTelefone(t))} <span class="dica">${esc(t.tipo || "")}</span></div>`).join("")}${c.site ? `<div class="cont-mini"><a href="${/^https?:/.test(c.site) ? esc(c.site) : "https://" + esc(c.site)}" target="_blank" rel="noopener">${esc(c.site)}</a></div>` : ""}`)
+    + `</div>`;
+}
+function htmlPropostasCliente(c) {
+  const ps = propostasDe(c.id);
+  return ps.length ? `<table class="lista"><thead><tr><th>Número</th><th>Tipo</th><th>Situação</th><th>Data</th><th>Validade</th><th class="num-r">Valor</th><th></th></tr></thead><tbody>${ps.map(p => `
+    <tr data-p="${p.id}"><td><b>${esc(p.numero || "—")}</b></td><td>${esc(p.origem || "")}</td><td><span class="badge ${corSituacao(p.situacao)}">${esc(p.situacao)}</span></td><td>${dataBR(p.data)}</td><td>${dataBR(p.validade)}</td><td class="num-r">${fmtBRL(p.total)}</td>
+    <td style="text-align:right;white-space:nowrap"><button class="btn peq pri" data-fp="abrir">Abrir</button> <button class="btn peq" data-fp="rev">Nova revisão</button></td></tr>`).join("")}</tbody></table>` : `<div class="vazio">Nenhuma proposta para este cliente ainda.</div>`;
+}
+function secSub(t, extra) { return `<div class="sub-sec" id="sec-${t}"><div class="cab"><span class="cresce n">${SUB[t].titulo}</span>${extra || ""}<button class="btn peq pri" data-subnovo="${t}">+ Adicionar</button></div><div class="cor" id="sub-${t}"></div></div>`; }
+function atualizarFicha() {
+  const c = fichaId && cliPorId(fichaId); if (!c || !$("#fichaCli")) return;
+  $("#fichaKpis").innerHTML = htmlKpis(c);
+  $("#fichaBadges").innerHTML = fichaBadges(c);
+  if (fichaAba === "resumo") $("#fab-resumo").innerHTML = htmlResumo(c);
+  if (fichaAba === "propostas") $("#fab-propostas").innerHTML = htmlPropostasCliente(c);
+  const cont = { licencas: licencasDe(c.id).filter(l => !licInativa(l)).length, contatos: contatosDe(c.id).length, propostas: propostasDe(c.id).length, atividades: atividadesDe(c.id).length, enderecos: enderecosDe(c.id).length + telefonesDe(c.id).length };
+  for (const [k, n] of Object.entries(cont)) { const b = $(`#fichaAbas [data-fa="${k}"] small`); if (b) b.textContent = n; }
+}
+function fichaBadges(c) { return `${badgeSuporte(c.suporte)} ${badgeNivel(c.nivel)} ${c.classificacao ? `<span class="badge b-azul">${esc(c.classificacao)}</span>` : ""} ${c.status_licenciamento ? `<span class="badge ${c.status_licenciamento === "Ativo" ? "b-verde" : "b-cinza"}">Licenciamento ${esc(c.status_licenciamento.toLowerCase())}</span>` : ""} ${c.ativo === false ? '<span class="badge b-cinza">cadastro inativo</span>' : ""}`; }
+function irAbaFicha(a) {
+  fichaAba = a;
+  $$("#fichaAbas [data-fa]").forEach(b => b.classList.toggle("ativo", b.dataset.fa === a));
+  $$("#fichaCli .fab").forEach(p => p.style.display = p.id === "fab-" + a ? "" : "none");
+  atualizarFicha();
+}
 function modalCliente(c, focar) {
   const novo = !c; c = c ? { ...c } : { id: uuid(), ativo: true, status_licenciamento: "Ativo" };
-  abrirModal(`<h3>${novo ? "Novo cliente" : esc(c.nome_fantasia || c.razao_social)}</h3>
-    <div class="linha" style="margin-bottom:12px"><div class="cresce"><label>Buscar dados na Receita pelo CNPJ</label><input id="mCnpjBusca" value="${esc(c.cnpj_cpf || "")}" inputmode="numeric"></div><button class="btn pri" id="mBusca">Buscar CNPJ</button></div>
-    <div class="grid g4">${CAMPOS_CLIENTE.map(f => campoHtml("mc-", f, c[f[0]])).join("")}</div>
-    <div class="rodape" style="justify-content:space-between">
-      <span>${novo ? "" : `<button class="btn perigo" id="mExcluir">Excluir cliente</button>`}</span>
-      <span class="linha"><button class="btn" onclick="fecharModal()">Fechar</button>${novo ? "" : `<button class="btn" id="mProp">Nova proposta</button>`}<button class="btn pri" id="mSalvar">Salvar dados</button></span>
+  fichaId = novo ? null : c.id; licVerInativas = false; itensAbertos.clear(); itemEditando = null;
+  const ct = !novo && (contatosDe(c.id).find(x => x.decisor && x.ativo !== false) || contatosDe(c.id).find(x => x.ativo !== false));
+  const abas = [["resumo", "Resumo"], ["licencas", "Licenças"], ["contatos", "Contatos"], ["propostas", "Propostas"], ["atividades", "Atividades"], ["enderecos", "Endereços e telefones"], ["dados", "Dados cadastrais"]];
+  abrirModal(`<div id="fichaCli">
+    <div class="ficha-cab">
+      <div class="cresce">
+        <h3 style="margin:0 0 2px">${novo ? "Novo cliente" : esc(c.nome_fantasia || c.razao_social)}</h3>
+        ${novo ? "" : `<div class="dica" style="margin:0">${esc([c.razao_social !== c.nome_fantasia && c.razao_social, c.cnpj_cpf, [c.cidade, c.uf].filter(Boolean).join(" - "), c.codigo_crm && "CRM " + c.codigo_crm].filter(Boolean).join(" · "))}</div>
+        <div id="fichaBadges" style="margin-top:6px">${fichaBadges(c)}</div>
+        ${ct ? `<div class="dica" style="margin-top:6px">Contato principal: <b>${esc(ct.nome)}</b> ${[linkMail(ct.email), ct.telefone ? linkTel(ct.telefone) : "", ct.celular ? linkTel(ct.celular) + linkZap(ct.celular) : ""].filter(Boolean).join(" · ")}</div>` : ""}`}
+      </div>
+      <div class="linha" style="align-items:flex-start;justify-content:flex-end">
+        ${novo ? "" : `<button class="btn pri" id="fNovaProp">Nova proposta</button><button class="btn" id="fRenov">Proposta de renovação</button><button class="btn" id="fAtiv">Registrar atividade</button>`}
+        <button class="btn" onclick="fecharModal()">Fechar</button>
+      </div>
     </div>
-    ${novo ? `<div class="dica">Salve os dados para poder incluir contatos, endereços, telefones e licenças.</div>` : Object.keys(SUB).map(t => `
-    <div class="sub-sec" id="sec-${t}"><div class="cab"><span class="cresce n">${SUB[t].titulo}</span><button class="btn peq pri" data-subnovo="${t}">+ Adicionar</button></div><div class="cor" id="sub-${t}"></div></div>`).join("")}`);
-  $("#modal").style.maxWidth = "980px";
-  if (!novo) for (const t of Object.keys(SUB)) { renderSub(t, c.id); ligarSub(t, c.id); }
-  if (focar) setTimeout(() => { const s = $("#sec-" + focar); if (s) s.scrollIntoView({ behavior: "smooth" }); }, 50);
+    ${novo ? "" : `<div id="fichaKpis"></div>
+    <div class="abas-ficha" id="fichaAbas">${abas.map(([k, r]) => `<button data-fa="${k}">${r}${["licencas", "contatos", "propostas", "atividades", "enderecos"].includes(k) ? " <small></small>" : ""}</button>`).join("")}</div>`}
+    <div class="fab" id="fab-resumo"></div>
+    <div class="fab" id="fab-licencas">${novo ? "" : secSub("licencas", `<label class="chk" style="font-weight:400;font-size:12px"><input type="checkbox" id="fLicInat"> mostrar inativas</label>`)}</div>
+    <div class="fab" id="fab-contatos">${novo ? "" : secSub("contatos")}</div>
+    <div class="fab" id="fab-propostas"></div>
+    <div class="fab" id="fab-atividades">${novo ? "" : (db.atividades ? secSub("atividades") : `<div class="aviso" style="display:block">Para registrar atividades, rode uma vez o arquivo <code>supabase/08_atividades.sql</code> no SQL Editor do Supabase e recarregue o sistema.</div>`)}</div>
+    <div class="fab" id="fab-enderecos">${novo ? "" : secSub("enderecos") + secSub("telefones")}</div>
+    <div class="fab" id="fab-dados">
+      <div class="linha" style="margin:4px 0 12px"><div class="cresce"><label>Buscar dados na Receita pelo CNPJ</label><input id="mCnpjBusca" value="${esc(c.cnpj_cpf || "")}" inputmode="numeric"></div><button class="btn pri" id="mBusca">Buscar CNPJ</button></div>
+      <div class="grid g4">${CAMPOS_CLIENTE.map(f => campoHtml("mc-", f, c[f[0]])).join("")}</div>
+      <div class="rodape" style="justify-content:space-between">
+        <span>${novo ? "" : `<button class="btn perigo" id="mExcluir">Excluir cliente</button>`}</span>
+        <button class="btn pri" id="mSalvar">${novo ? "Salvar e abrir a ficha" : "Salvar dados"}</button>
+      </div>
+    </div>
+  </div>`);
+  $("#modal").style.maxWidth = "1180px";
+  if (novo) { $$("#fichaCli .fab").forEach(p => p.style.display = p.id === "fab-dados" ? "" : "none"); }
+  else {
+    for (const t of Object.keys(SUB)) if ($("#sub-" + t)) { renderSub(t, c.id); ligarSub(t, c.id); }
+    $("#fichaAbas").addEventListener("click", e => { const b = e.target.closest("[data-fa]"); if (b) irAbaFicha(b.dataset.fa); });
+    $("#fichaCli").addEventListener("click", e => {
+      const ir = e.target.closest("[data-ir]"); if (ir) { irAbaFicha(ir.dataset.ir); if (ir.dataset.novo) renderSub(ir.dataset.novo, c.id, "novo"); return; }
+      const bp = e.target.closest("[data-fp]"); if (!bp) return;
+      const p = db.propostas.find(x => x.id === bp.closest("[data-p]").dataset.p);
+      const base = Object.assign(novaProposta(), clone(p.dados || {})); base.id = p.id; base.situacao = p.situacao; base.origem = p.origem || base.origem;
+      if (bp.dataset.fp === "rev") { base.id = uuid(); base.numero = proximaRevisao(p.numero); base.data = hojeISO(); base.validade = addDias(hojeISO(), db.config.validadeDias); base.situacao = "Rascunho"; }
+      cur = base; salvarRascunho(); fecharModal(); irAba("proposta"); renderProposta(); toast(bp.dataset.fp === "rev" ? "Nova revisão: " + cur.numero : "Proposta aberta.");
+    });
+    $("#fLicInat").addEventListener("change", e => { licVerInativas = e.target.checked; renderSub("licencas", c.id); });
+    $("#fNovaProp").onclick = () => { cur = novaProposta(); aplicarCliente(cliPorId(c.id)); salvarRascunho(); fecharModal(); irAba("proposta"); renderProposta(); toast("Nova proposta para " + (c.nome_fantasia || c.razao_social)); };
+    $("#fRenov").onclick = () => {
+      const alvo = licencasDe(c.id).filter(l => !licInativa(l) && ["vencida", "avencer"].includes(situacaoLicenca(l).cod));
+      if (!alvo.length) return toast("Nenhuma licença ativa vencida ou vencendo em 90 dias. Use a aba Licenças para escolher outra.", true);
+      fecharModal(); propostaDeLicenca(alvo[0], alvo);
+    };
+    $("#fAtiv").onclick = () => { if (!db.atividades) return irAbaFicha("atividades"); irAbaFicha("atividades"); renderSub("atividades", c.id, "novo"); };
+    irAbaFicha(focar || "resumo");
+  }
   let endReceita = null, contatoReceita = null;
   $("#mBusca").onclick = async () => {
     const b = $("#mBusca"); b.disabled = true; b.innerHTML = '<span class="spin"></span> Buscando';
@@ -1063,19 +1194,16 @@ function modalCliente(c, focar) {
     }
     if (novo && contatoReceita) substituir(db.contatos, await gravar("contatos", { id: uuid(), cliente_id: r.id, nome: contatoReceita.nome, email: vazioNull(contatoReceita.email), telefone: vazioNull(contatoReceita.telefone), observacoes: "Sócio (dados da Receita)" }));
     preencherFiltrosCli(); posAlteracaoCliente(); toast("Cliente salvo.");
-    if (novo) modalCliente(r); else { c = r; endReceita = null; }
+    if (novo) modalCliente(r); else { c = r; endReceita = null; atualizarFicha(); }
   });
-  if (!novo) {
-    $("#mProp").onclick = () => { cur = novaProposta(); aplicarCliente(cliPorId(c.id)); salvarRascunho(); fecharModal(); irAba("proposta"); renderProposta(); toast("Nova proposta para " + (c.nome_fantasia || c.razao_social)); };
-    $("#mExcluir").onclick = () => tentar(async () => {
-      const nProp = db.propostas.filter(p => p.cliente_id === c.id).length;
-      if (nProp) return toast(`Este cliente tem ${nProp} proposta(s) — não pode ser excluído. Desmarque "Cadastro ativo" para inativá-lo.`, true);
-      if (!confirm(`Excluir DEFINITIVAMENTE ${c.nome_fantasia} e todos os seus contatos, endereços, telefones e licenças?`)) return;
-      await apagar("clientes", c.id);
-      db.clientes = db.clientes.filter(x => x.id !== c.id); for (const t of Object.keys(SUB)) db[t] = db[t].filter(x => x.cliente_id !== c.id);
-      fecharModal(); posAlteracaoCliente(); toast("Cliente excluído.");
-    });
-  }
+  if (!novo) $("#mExcluir").onclick = () => tentar(async () => {
+    const nProp = db.propostas.filter(p => p.cliente_id === c.id).length;
+    if (nProp) return toast(`Este cliente tem ${nProp} proposta(s) — não pode ser excluído. Desmarque "Cadastro ativo" para inativá-lo.`, true);
+    if (!confirm(`Excluir DEFINITIVAMENTE ${c.nome_fantasia} e todos os seus contatos, endereços, telefones, licenças e atividades?`)) return;
+    await apagar("clientes", c.id);
+    db.clientes = db.clientes.filter(x => x.id !== c.id); for (const t of Object.keys(SUB)) if (db[t]) db[t] = db[t].filter(x => x.cliente_id !== c.id);
+    fecharModal(); posAlteracaoCliente(); toast("Cliente excluído.");
+  });
 }
 function ligarClientes() {
   for (const id of ["#buscaCli", "#fcStatus", "#fcSuporte", "#fcNivel"]) $(id).addEventListener(id === "#buscaCli" ? "input" : "change", renderListaCli);

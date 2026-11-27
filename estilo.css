@@ -137,3 +137,31 @@ code{background:#f1f3f6;padding:0 4px;border-radius:3px}
   .linha>.chk{min-width:0}
   input,select,textarea{font-size:16px}
 }
+/* ---------- ficha do cliente ---------- */
+.ficha-cab{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;padding-bottom:12px;border-bottom:1px solid var(--borda);margin-bottom:12px}
+.ficha-cab .cresce{flex:1;min-width:260px}
+.ficha-cab a{color:var(--azul);text-decoration:none;white-space:nowrap}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}
+.kpi{background:#f7f9fc;border:1px solid var(--borda);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;min-width:0}
+.kpi b{font-size:20px;color:var(--azul-esc);line-height:1.2}
+.kpi span{font-size:12px;color:var(--txt)}
+.kpi small{font-size:11px;color:var(--sub);overflow:hidden;text-overflow:ellipsis}
+.kpi.k-verm{background:#fdecea;border-color:#f5c2bd}.kpi.k-verm b{color:#b42318}
+.kpi.k-amar{background:#fff6dd;border-color:#f0d58a}.kpi.k-amar b{color:#9a6700}
+.kpi.k-verde{background:#e6f4ea;border-color:#b7dfc4}.kpi.k-verde b{color:#1e7b46}
+.abas-ficha{display:flex;gap:2px;border-bottom:2px solid var(--borda);margin-bottom:12px;overflow-x:auto;scrollbar-width:none}
+.abas-ficha::-webkit-scrollbar{display:none}
+.abas-ficha button{background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;padding:8px 12px;font:inherit;color:var(--sub);cursor:pointer;white-space:nowrap}
+.abas-ficha button.ativo{color:var(--azul-esc);border-bottom-color:var(--azul);font-weight:600}
+.abas-ficha small{background:var(--azul-cl);color:var(--azul-esc);border-radius:9px;padding:0 6px;font-size:11px}
+.abas-ficha small:empty{display:none}
+.resumo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.card-mini{border:1px solid var(--borda);border-radius:8px;padding:10px 12px;min-width:0}
+.cm-cab{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;color:var(--azul-esc)}
+.cm-cab .btn-link{margin:0;font-size:12px}
+.card-mini table.lista td{padding:4px 4px}
+.cont-mini{padding:5px 0;border-bottom:1px solid #f0f2f5;font-size:13px;overflow-wrap:anywhere}
+.cont-mini:last-child{border-bottom:0}
+.cont-mini a,.sub-item a{color:var(--azul);text-decoration:none}
+@media(max-width:1000px){.kpis{grid-template-columns:repeat(3,1fr)}.resumo-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}.resumo-grid{grid-template-columns:1fr}.ficha-cab .linha .btn{flex:1}}
