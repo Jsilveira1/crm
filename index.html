@@ -9,7 +9,7 @@
 <link rel="icon" href="icone.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icone.svg">
 <title>Propostas SKA</title>
-<link rel="stylesheet" href="estilo.css?v=202611270813">
+<link rel="stylesheet" href="estilo.css?v=202611271127">
 </head>
 <body>
 
@@ -161,6 +161,7 @@
       <input class="busca" id="buscaProp" placeholder="Buscar por número ou cliente...">
       <select id="fpropSit"></select>
       <select id="fpropOrig"></select>
+      <button class="btn perigo" id="btnExcluirSel" disabled>Excluir selecionadas</button>
     </div>
     <div id="listaProp" class="rolar"></div>
   </div>
@@ -293,6 +294,7 @@
 
 <div class="barra-acao" id="barraAcao">
   <span class="resumo" id="resumo"></span>
+  <button class="btn perigo" id="btnExcluirProp" style="display:none" title="Excluir esta proposta do banco">Excluir</button>
   <button class="btn" id="btnNovaProp">Limpar / nova</button>
   <button class="btn" id="btnSalvarProp">Salvar proposta</button>
   <button class="btn pri grande" id="btnGerar">Gerar proposta (.docx)</button>
@@ -313,7 +315,7 @@
 <script src="libs/supabase.js"></script>
 <script src="libs/pizzip.min.js"></script>
 <script src="libs/docxtemplater.js"></script>
-<script src="config.js?v=202611270813"></script>
-<script src="app.js?v=202611270813"></script>
+<script src="config.js?v=202611271127"></script>
+<script src="app.js?v=202611271127"></script>
 </body>
 </html>

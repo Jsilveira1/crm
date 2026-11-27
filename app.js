@@ -390,7 +390,9 @@ function renderDescs() {
   const usados = new Set(l.map(d => d.id));
   $("#pDescAdd").innerHTML = `<option value="">Incluir outro descritivo...</option>` + db.descritivos.filter(d => !usados.has(d.id)).map(d => `<option value="${d.id}">${esc(d.titulo)}</option>`).join("");
 }
+function renderBtnExcluirAtual() { const b = $("#btnExcluirProp"); if (b) b.style.display = cur && db.propostas.some(p => p.id === cur.id) ? "" : "none"; }
 function renderResumo() {
+  renderBtnExcluirAtual();
   const n = cur.tabelas.length;
   const tot = cur.modo === "somatoria" ? "Total geral " + fmtBRL(totalGeral()) : cur.tabelas.map((t, i) => `Op.${i + 1}: ${fmtBRL(calcTabela(t).total)}`).join("  ·  ");
   $("#resumo").textContent = `${cur.numero ? "Proposta " + cur.numero + " — " : ""}${cur.cliente.empresa || "sem cliente"} — ${n} tabela(s)${n ? " — " + tot : ""}`;
@@ -797,28 +799,45 @@ async function salvarProposta(silencioso) {
   const r = await tentar(() => gravar("propostas", row));
   if (!r) return false;
   const i = db.propostas.findIndex(x => x.id === r.id); if (i >= 0) db.propostas[i] = r; else db.propostas.unshift(r);
-  salvarRascunho(); renderListaProp();
+  salvarRascunho(); renderListaProp(); renderBtnExcluirAtual();
   if (!silencioso) toast("Proposta salva no banco.");
   return true;
 }
 function proximaRevisao(n) { const m = String(n || "").match(/^(.*-)(\d+)$/); return m ? m[1] + (+m[2] + 1) : (n ? n + "-2" : ""); }
+async function excluirPropostas(ids) {
+  ids = ids.filter(id => db.propostas.some(p => p.id === id)); if (!ids.length) return false;
+  const nomes = ids.map(id => { const p = db.propostas.find(x => x.id === id); return (p.numero || "sem número") + " — " + ((p.dados && p.dados.cliente && p.dados.cliente.empresa) || ""); });
+  if (!confirm(`Excluir DEFINITIVAMENTE ${ids.length > 1 ? ids.length + " propostas" : "a proposta"}?\n\n${nomes.slice(0, 10).join("\n")}${nomes.length > 10 ? "\n..." : ""}\n\nO arquivo Word já baixado no seu computador não é apagado.`)) return false;
+  const ok = await tentar(async () => { const { error } = await sb.from("propostas").delete().in("id", ids); erroSb(error, "excluir proposta"); return true; });
+  if (!ok) return false;
+  db.propostas = db.propostas.filter(p => !ids.includes(p.id));
+  if (cur && ids.includes(cur.id)) { cur = novaProposta(); salvarRascunho(); renderProposta(); }
+  renderListaProp(); try { renderAgenda(); atualizarFicha(); } catch (e) { }
+  toast(ids.length > 1 ? ids.length + " propostas excluídas." : "Proposta excluída.");
+  return true;
+}
 function corSituacao(s) { return { Ganha: "b-verde", Perdida: "b-vermelho", Cancelada: "b-cinza", "Em negociação": "b-amarelo", Enviada: "b-azul" }[s] || "b-cinza"; }
 function renderListaProp() {
   const q = norm($("#buscaProp").value), fs = $("#fpropSit").value, fo = $("#fpropOrig").value;
   const l = db.propostas.filter(p => (!fs || p.situacao === fs) && (!fo || p.origem === fo) && (!q || norm((p.numero || "") + " " + ((p.dados && p.dados.cliente && p.dados.cliente.empresa) || "") + " " + ((cliPorId(p.cliente_id) || {}).nome_fantasia || "")).includes(q)));
-  $("#listaProp").innerHTML = l.length ? `<table class="lista"><thead><tr><th>Número</th><th>Cliente</th><th>Tipo</th><th>Situação</th><th>Data</th><th>Validade</th><th class="num-r">Valor</th><th></th></tr></thead><tbody>${l.map(p => {
+  $("#listaProp").innerHTML = l.length ? `<table class="lista"><thead><tr><th style="width:28px"><input type="checkbox" id="propTodas" title="Selecionar todas da lista"></th><th>Número</th><th>Cliente</th><th>Tipo</th><th>Situação</th><th>Data</th><th>Validade</th><th class="num-r">Valor</th><th></th></tr></thead><tbody>${l.map(p => {
     const emp = (p.dados && p.dados.cliente && p.dados.cliente.empresa) || "—"; const vencida = p.validade && p.validade < hojeISO() && ["Enviada", "Em negociação"].includes(p.situacao);
-    return `<tr data-p="${p.id}"><td><b>${esc(p.numero || "—")}</b></td><td>${esc(emp)}</td><td>${esc(p.origem || "")}</td>
+    return `<tr data-p="${p.id}"><td><input type="checkbox" data-psel></td><td><b>${esc(p.numero || "—")}</b></td><td>${esc(emp)}</td><td>${esc(p.origem || "")}</td>
     <td><select data-pa="sit" style="width:auto;padding:3px 6px;font-size:12px">${SITUACOES.map(s => `<option ${s === p.situacao ? "selected" : ""}>${s}</option>`).join("")}</select></td>
     <td>${dataBR(p.data)}</td><td>${dataBR(p.validade)}${vencida ? ' <span class="badge b-vermelho">expirada</span>' : ""}</td><td class="num-r">${fmtBRL(p.total)}</td>
-    <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-pa="abrir">Abrir</button> <button class="btn peq" data-pa="rev">Nova revisão</button> <button class="btn peq" data-pa="dup">Usar como base</button> <button class="btn peq perigo" data-pa="del">✕</button></td></tr>`; }).join("")}</tbody></table>`
+    <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-pa="abrir">Abrir</button> <button class="btn peq" data-pa="rev">Nova revisão</button> <button class="btn peq" data-pa="dup">Usar como base</button> <button class="btn peq perigo" data-pa="del">Excluir</button></td></tr>`; }).join("")}</tbody></table>`
     : `<div class="vazio">Nenhuma proposta. Ao gerar uma proposta ela é salva aqui automaticamente.</div>`;
+  atualizarSelProp();
 }
+function atualizarSelProp() { const n = $$("#listaProp [data-psel]:checked").length; const b = $("#btnExcluirSel"); if (b) { b.disabled = !n; b.textContent = n ? `Excluir selecionadas (${n})` : "Excluir selecionadas"; } }
 function ligarListaProp() {
   $("#fpropSit").innerHTML = `<option value="">Situação: todas</option>` + SITUACOES.map(s => `<option>${s}</option>`).join("");
   $("#fpropOrig").innerHTML = `<option value="">Tipo: todos</option>` + ORIGENS.map(s => `<option>${s}</option>`).join("");
   for (const id of ["#buscaProp", "#fpropSit", "#fpropOrig"]) $(id).addEventListener(id === "#buscaProp" ? "input" : "change", renderListaProp);
+  $("#btnExcluirSel").addEventListener("click", () => excluirPropostas($$("#listaProp [data-psel]:checked").map(c => c.closest("[data-p]").dataset.p)));
   $("#listaProp").addEventListener("change", async e => {
+    if (e.target.id === "propTodas") { $$("#listaProp [data-psel]").forEach(c => c.checked = e.target.checked); return atualizarSelProp(); }
+    if (e.target.matches("[data-psel]")) return atualizarSelProp();
     if (e.target.dataset.pa !== "sit") return; const id = e.target.closest("[data-p]").dataset.p; const p = db.propostas.find(x => x.id === id);
     const dados = Object.assign({}, p.dados, { situacao: e.target.value });
     const r = await tentar(async () => { const { data, error } = await sb.from("propostas").update({ situacao: e.target.value, dados }).eq("id", id).select().single(); erroSb(error, "atualizar proposta"); return data; });
@@ -826,11 +845,7 @@ function ligarListaProp() {
   });
   $("#listaProp").addEventListener("click", async e => {
     const b = e.target.closest("button"); if (!b) return; const id = b.closest("[data-p]").dataset.p; const p = db.propostas.find(x => x.id === id);
-    if (b.dataset.pa === "del") {
-      if (!confirm("Excluir a proposta " + (p.numero || "") + "?")) return;
-      if (!(await tentar(async () => { await apagar("propostas", id); return true; }))) return;
-      db.propostas = db.propostas.filter(x => x.id !== id); return renderListaProp();
-    }
+    if (b.dataset.pa === "del") return excluirPropostas([id]);
     const base = Object.assign(novaProposta(), clone(p.dados || {}));
     base.id = p.id; base.situacao = p.situacao; base.origem = p.origem || base.origem;
     if (b.dataset.pa === "abrir") cur = base;
@@ -1228,7 +1243,7 @@ function htmlPropostasCliente(c) {
   const ps = propostasDe(c.id);
   return ps.length ? `<table class="lista"><thead><tr><th>Número</th><th>Tipo</th><th>Situação</th><th>Data</th><th>Validade</th><th class="num-r">Valor</th><th></th></tr></thead><tbody>${ps.map(p => `
     <tr data-p="${p.id}"><td><b>${esc(p.numero || "—")}</b></td><td>${esc(p.origem || "")}</td><td><span class="badge ${corSituacao(p.situacao)}">${esc(p.situacao)}</span></td><td>${dataBR(p.data)}</td><td>${dataBR(p.validade)}</td><td class="num-r">${fmtBRL(p.total)}</td>
-    <td style="text-align:right;white-space:nowrap"><button class="btn peq pri" data-fp="abrir">Abrir</button> <button class="btn peq" data-fp="rev">Nova revisão</button></td></tr>`).join("")}</tbody></table>` : `<div class="vazio">Nenhuma proposta para este cliente ainda.</div>`;
+    <td style="text-align:right;white-space:nowrap"><button class="btn peq pri" data-fp="abrir">Abrir</button> <button class="btn peq" data-fp="rev">Nova revisão</button> <button class="btn peq perigo" data-fp="del">Excluir</button></td></tr>`).join("")}</tbody></table>` : `<div class="vazio">Nenhuma proposta para este cliente ainda.</div>`;
 }
 function secSub(t, extra) { return `<div class="sub-sec" id="sec-${t}"><div class="cab"><span class="cresce n">${SUB[t].titulo}</span>${extra || ""}<button class="btn peq pri" data-subnovo="${t}">+ Adicionar</button></div><div class="cor" id="sub-${t}"></div></div>`; }
 function atualizarFicha() {
@@ -1291,6 +1306,7 @@ function modalCliente(c, focar) {
       const ir = e.target.closest("[data-ir]"); if (ir) { irAbaFicha(ir.dataset.ir); if (ir.dataset.novo) renderSub(ir.dataset.novo, c.id, "novo"); return; }
       const bp = e.target.closest("[data-fp]"); if (!bp) return;
       const p = db.propostas.find(x => x.id === bp.closest("[data-p]").dataset.p);
+      if (bp.dataset.fp === "del") return excluirPropostas([p.id]);
       const base = Object.assign(novaProposta(), clone(p.dados || {})); base.id = p.id; base.situacao = p.situacao; base.origem = p.origem || base.origem;
       if (bp.dataset.fp === "rev") { base.id = uuid(); base.numero = proximaRevisao(p.numero); base.data = hojeISO(); base.validade = addDias(hojeISO(), db.config.validadeDias); base.situacao = "Rascunho"; }
       cur = base; salvarRascunho(); fecharModal(); irAba("proposta"); renderProposta(); toast(bp.dataset.fp === "rev" ? "Nova revisão: " + cur.numero : "Proposta aberta.");
@@ -1720,6 +1736,7 @@ async function iniciarApp(sessao) {
   for (const lig of [ligarAgenda, ligarProposta, ligarListaProp, ligarRenovacoes, ligarClientes, ligarProdutos, ligarDescritivos, ligarConfig]) { try { lig(); } catch (e) { console.error(e); mostrarErro("Erro ao preparar a tela (" + lig.name + ")", e); } }
   $("#btnGerar").addEventListener("click", gerarDocx);
   $("#btnSalvarProp").addEventListener("click", () => salvarProposta(false));
+  $("#btnExcluirProp").addEventListener("click", () => excluirPropostas([cur.id]));
   $("#btnNovaProp").addEventListener("click", () => { if (!confirm("Começar uma proposta nova? (salve antes se quiser manter a atual)")) return; cur = novaProposta(); salvarRascunho(); renderProposta(); });
   renderTudo();
   irAba("agenda");
