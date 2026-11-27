@@ -37,7 +37,8 @@
 <header>
   <h1>Propostas SKA</h1>
   <nav id="nav">
-    <button data-aba="proposta" class="ativo">Nova proposta</button>
+    <button data-aba="agenda" class="ativo">Agenda</button>
+    <button data-aba="proposta">Nova proposta</button>
     <button data-aba="propostas">Propostas</button>
     <button data-aba="renovacoes">Renovações</button>
     <button data-aba="clientes">Clientes</button>
@@ -53,7 +54,18 @@
 <div id="avisoModelo"></div>
 
 <!-- ===================== PROPOSTA ===================== -->
-<section class="aba ativa" id="aba-proposta">
+<!-- ===================== AGENDA ===================== -->
+<section class="aba ativa" id="aba-agenda">
+  <div class="linha" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0;font-size:18px;color:var(--azul-esc)">Agenda <span class="dica" id="agData" style="font-weight:400"></span></h2>
+    <div><label style="display:inline">Licenças vencendo em</label> <select id="agDias" style="width:auto"><option>30</option><option selected>60</option><option>90</option><option>120</option></select> dias</div></div>
+  <div id="agKpis"></div>
+  <div class="card"><h2>Retornos (atrasados, hoje e próximos 7 dias)</h2><div id="agRet" class="rolar"></div></div>
+  <div class="card"><h2>Licenças para renovar</h2><div id="agLic" class="rolar"></div></div>
+  <div class="card"><h2>Propostas aguardando resposta</h2><div id="agProp" class="rolar"></div></div>
+  <div class="card"><h2>Clientes com licença ativa sem contato há 90+ dias</h2><div id="agSem" class="rolar"></div></div>
+</section>
+
+<section class="aba" id="aba-proposta">
   <div class="card">
     <h2><span class="num">1</span>Cliente</h2>
     <div class="linha" style="margin-bottom:12px">

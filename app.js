@@ -880,6 +880,92 @@ function ligarRenovacoes() {
   });
 }
 
+/* ============================ agenda (tela inicial) ============================ */
+function nomeCli(id) { const c = cliPorId(id) || {}; return c.nome_fantasia || c.razao_social || "?"; }
+function renderAgenda() {
+  const hoje = hojeISO(), em7 = addDias(hoje, 7), dias = +($("#agDias") && $("#agDias").value) || 60;
+  const ate = addDias(hoje, dias);
+  // 1) retornos (atividades com próximo passo pendente)
+  const pend = (db.atividades || []).filter(a => a.proximo_data && !a.concluido).sort((a, b) => a.proximo_data.localeCompare(b.proximo_data));
+  const atras = pend.filter(a => a.proximo_data < hoje), deHoje = pend.filter(a => a.proximo_data === hoje), prox = pend.filter(a => a.proximo_data > hoje && a.proximo_data <= em7);
+  // 2) licenças ativas vencendo no período e vencidas há pouco (até 90 dias)
+  const lics = db.licencas.filter(l => !licInativa(l) && l.validade && cliPorId(l.cliente_id));
+  const vencendo = lics.filter(l => l.validade >= hoje && l.validade <= ate).sort((a, b) => a.validade.localeCompare(b.validade));
+  const recemVenc = lics.filter(l => l.validade < hoje && l.validade >= addDias(hoje, -90)).sort((a, b) => b.validade.localeCompare(a.validade));
+  // 3) propostas aguardando resposta
+  const abertas = db.propostas.filter(p => ["Enviada", "Em negociação"].includes(p.situacao)).sort((a, b) => String(a.validade || "9").localeCompare(String(b.validade || "9")));
+  // 4) clientes ativos com licença ativa e sem atividade há 90+ dias
+  const ultimo = {}; for (const a of db.atividades || []) if (!ultimo[a.cliente_id] || a.data > ultimo[a.cliente_id]) ultimo[a.cliente_id] = a.data;
+  const comLic = new Set(lics.filter(l => situacaoLicenca(l).cod !== "vencida").map(l => l.cliente_id));
+  const semContato = db.atividades ? db.clientes.filter(c => c.ativo !== false && comLic.has(c.id) && (!ultimo[c.id] || ultimo[c.id] < addDias(hoje, -90)))
+    .sort((a, b) => String(ultimo[a.id] || "").localeCompare(String(ultimo[b.id] || "")) || (a.nome_fantasia || "").localeCompare(b.nome_fantasia || "")) : [];
+
+  const k = (n, rot, cls, alvo) => `<button class="kpi ${cls || ""}" data-ag-ir="${alvo}" style="cursor:pointer;text-align:left;font:inherit"><b>${n}</b><span>${rot}</span></button>`;
+  $("#agKpis").innerHTML = `<div class="kpis">
+    ${k(atras.length, "retornos atrasados", atras.length ? "k-verm" : "", "agRet")}
+    ${k(deHoje.length, "retornos para hoje", deHoje.length ? "k-amar" : "", "agRet")}
+    ${k(vencendo.length, `licenças vencem em ${dias} dias`, vencendo.length ? "k-amar" : "", "agLic")}
+    ${k(recemVenc.length, "venceram nos últimos 90 dias", recemVenc.length ? "k-verm" : "", "agLic")}
+    ${k(abertas.length, "propostas aguardando resposta", "", "agProp")}
+    ${k(db.atividades ? semContato.length : "—", "clientes sem contato há 90+ dias", "", "agSem")}
+  </div>`;
+
+  const linhaAtiv = a => { const ct = db.contatos.find(x => x.id === a.contato_id); const cls = a.proximo_data < hoje ? "b-vermelho" : a.proximo_data === hoje ? "b-amarelo" : "b-azul";
+    return `<tr data-cli="${a.cliente_id}" data-ativ="${a.id}"><td><span class="badge ${cls}">${dataBR(a.proximo_data)}</span></td><td><b>${esc(nomeCli(a.cliente_id))}</b>${ct ? `<div class="dica" style="margin:0">${esc(ct.nome)}${ct.celular ? " · " + linkTel(ct.celular) + linkZap(ct.celular) : ct.telefone ? " · " + linkTel(ct.telefone) : ""}</div>` : ""}</td>
+      <td>${esc(a.proximo_passo || "Retorno")}<div class="dica" style="margin:0">${esc((a.descricao || "").slice(0, 100))}</div></td>
+      <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-ag="concluir">✓ Concluir</button> <button class="btn peq" data-ag="registrar">Registrar contato</button> <button class="btn peq" data-ag="ficha">Ficha</button></td></tr>`; };
+  $("#agRet").innerHTML = !db.atividades ? `<div class="aviso" style="display:block">Para usar a agenda de retornos, rode o arquivo <code>supabase/08_atividades.sql</code> no SQL Editor do Supabase e recarregue.</div>`
+    : (atras.length + deHoje.length + prox.length) ? `<table class="lista"><tbody>${[...atras, ...deHoje, ...prox].map(linhaAtiv).join("")}</tbody></table>`
+    : `<div class="vazio">Nenhum retorno atrasado, para hoje ou nos próximos 7 dias. 👍</div>`;
+
+  const linhaLic = l => { const s = situacaoLicenca(l), c = cliPorId(l.cliente_id);
+    return `<tr data-cli="${l.cliente_id}" data-lic="${l.id}"><td><span class="badge ${s.cls}">${esc(s.txt)}</span><div class="dica" style="margin:0">${dataBR(l.validade)}</div></td><td><b>${esc(nomeCli(l.cliente_id))}</b> ${badgeSuporte(c.suporte)}</td>
+      <td><code>${esc(l.numero_serie || "")}</code> <span class="dica">${esc(l.tipo_licenca || "")} · ${esc(l.quantidade)}x</span><div class="dica" style="margin:0">${esc(produtoDaLicenca(l)) || "produto não informado"}</div></td>
+      <td style="white-space:nowrap;text-align:right"><button class="btn peq pri" data-ag="propor">Proposta</button> <button class="btn peq" data-ag="registrar">Registrar contato</button> <button class="btn peq" data-ag="fichalic">Ficha</button></td></tr>`; };
+  $("#agLic").innerHTML = (vencendo.length || recemVenc.length) ? `<table class="lista"><tbody>
+      ${vencendo.length ? `<tr class="cat-h"><td colspan="4">Vencem nos próximos ${dias} dias (${vencendo.length})</td></tr>${vencendo.map(linhaLic).join("")}` : ""}
+      ${recemVenc.length ? `<tr class="cat-h"><td colspan="4">Venceram nos últimos 90 dias (${recemVenc.length}) — renovação com retroatividade</td></tr>${recemVenc.map(linhaLic).join("")}` : ""}
+    </tbody></table>` : `<div class="vazio">Nenhuma licença ativa vencendo em ${dias} dias.</div>`;
+
+  $("#agProp").innerHTML = abertas.length ? `<table class="lista"><tbody>${abertas.map(p => { const exp = p.validade && p.validade < hoje, quase = p.validade && !exp && p.validade <= em7;
+      return `<tr data-cli="${p.cliente_id || ""}" data-prop="${p.id}"><td><b>${esc(p.numero || "—")}</b> <span class="badge ${corSituacao(p.situacao)}">${esc(p.situacao)}</span></td><td>${esc(p.cliente_id ? nomeCli(p.cliente_id) : (p.dados && p.dados.cliente && p.dados.cliente.empresa) || "")}</td>
+        <td>${fmtBRL(p.total)}<div class="dica" style="margin:0">enviada ${dataBR(p.data)} · validade ${dataBR(p.validade)} ${exp ? '<span class="badge b-vermelho">expirada</span>' : quase ? '<span class="badge b-amarelo">expira em breve</span>' : ""}</div></td>
+        <td style="white-space:nowrap;text-align:right"><select data-ag="sit" style="width:auto;padding:3px 6px;font-size:12px">${SITUACOES.map(s => `<option ${s === p.situacao ? "selected" : ""}>${s}</option>`).join("")}</select> ${p.cliente_id ? '<button class="btn peq" data-ag="registrar">Registrar contato</button>' : ""} <button class="btn peq" data-ag="abrirprop">Abrir</button></td></tr>`; }).join("")}</tbody></table>`
+    : `<div class="vazio">Nenhuma proposta enviada aguardando resposta.</div>`;
+
+  $("#agSem").innerHTML = !db.atividades ? "" : semContato.length ? `<table class="lista"><tbody>${semContato.slice(0, 30).map(c => { const r = resumoLicencasCliente(c.id);
+      return `<tr data-cli="${c.id}"><td><b>${esc(c.nome_fantasia)}</b> ${badgeNivel(c.nivel)}</td><td>${r.ativas} licença(s) ativa(s)${r.prox ? ` · próx. validade ${dataBR(r.prox.validade)}` : ""}</td><td class="dica">${ultimo[c.id] ? "último contato " + dataBR(ultimo[c.id]) : "nenhum contato registrado"}</td>
+        <td style="white-space:nowrap;text-align:right"><button class="btn peq" data-ag="registrar">Registrar contato</button> <button class="btn peq" data-ag="ficha">Ficha</button></td></tr>`; }).join("")}</tbody></table>${semContato.length > 30 ? `<div class="dica">+ ${semContato.length - 30} cliente(s).</div>` : ""}`
+    : `<div class="vazio">Todos os clientes com licença ativa tiveram contato nos últimos 90 dias.</div>`;
+  $("#agData").textContent = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+function ligarAgenda() {
+  $("#agDias").addEventListener("change", renderAgenda);
+  const box = $("#aba-agenda");
+  box.addEventListener("click", async e => {
+    const ir = e.target.closest("[data-ag-ir]"); if (ir) { const el = $("#" + ir.dataset.agIr); if (el) el.closest(".card").scrollIntoView({ behavior: "smooth" }); return; }
+    const b = e.target.closest("button[data-ag]"); if (!b) return;
+    const tr = b.closest("tr"), cli = tr.dataset.cli && cliPorId(tr.dataset.cli), a = b.dataset.ag;
+    if (a === "concluir") {
+      const at = db.atividades.find(x => x.id === tr.dataset.ativ);
+      const r = await tentar(() => gravar("atividades", { ...at, concluido: true }));
+      if (r) { substituir(db.atividades, r); renderAgenda(); toast("Retorno concluído. Que tal registrar como foi?"); }
+    }
+    if (a === "registrar" && cli) { modalCliente(cli, "atividades"); if (db.atividades) renderSub("atividades", cli.id, "novo"); }
+    if (a === "ficha" && cli) modalCliente(cli);
+    if (a === "fichalic" && cli) modalCliente(cli, "licencas");
+    if (a === "propor") { const l = db.licencas.find(x => x.id === tr.dataset.lic); propostaDeLicenca(l, [l]); }
+    if (a === "abrirprop") { const p = db.propostas.find(x => x.id === tr.dataset.prop); cur = Object.assign(novaProposta(), clone(p.dados || {})); cur.id = p.id; cur.situacao = p.situacao; cur.origem = p.origem || cur.origem; salvarRascunho(); irAba("proposta"); renderProposta(); }
+  });
+  box.addEventListener("change", async e => {
+    if (e.target.dataset.ag !== "sit") return;
+    const id = e.target.closest("tr").dataset.prop, p = db.propostas.find(x => x.id === id);
+    const dados = Object.assign({}, p.dados, { situacao: e.target.value });
+    const r = await tentar(async () => { const { data, error } = await sb.from("propostas").update({ situacao: e.target.value, dados }).eq("id", id).select().single(); erroSb(error, "atualizar proposta"); return data; });
+    if (r) { Object.assign(p, r); renderAgenda(); renderListaProp(); toast("Situação atualizada: " + r.situacao); }
+  });
+}
+
 /* ============================ clientes ============================ */
 function renderListaCli() {
   const q = norm($("#buscaCli").value), fs = $("#fcStatus").value, fsu = $("#fcSuporte").value, fn = $("#fcNivel").value;
@@ -1035,7 +1121,7 @@ function ligarSub(tabela, clienteId) {
     }
   };
 }
-function posAlteracaoCliente() { renderListaCli(); renderRenovacoes(); renderDatalists(); if (cur.cliente.id) renderAlertaCliente(cliPorId(cur.cliente.id)); try { atualizarFicha(); } catch (e) { console.warn(e); } }
+function posAlteracaoCliente() { renderListaCli(); renderRenovacoes(); try { renderAgenda(); } catch (e) { console.warn(e); } renderDatalists(); if (cur.cliente.id) renderAlertaCliente(cliPorId(cur.cliente.id)); try { atualizarFicha(); } catch (e) { console.warn(e); } }
 /* ============================ ficha do cliente (CRM) ============================ */
 let fichaId = null, fichaAba = "resumo", licVerInativas = false;
 const atividadesDe = id => (db.atividades || []).filter(x => x.cliente_id === id);
@@ -1551,7 +1637,7 @@ function renderDatalists() {
   $("#dlGrupos").innerHTML = db.grupos.map(g => `<option value="${esc(g)}">`).join("");
 }
 function renderTudo() {
-  for (const f of [renderDatalists, preencherFiltrosCli, renderProposta, renderListaProp, renderRenovacoes, renderListaCli, renderListaProd, renderListaDesc, renderConfig]) {
+  for (const f of [renderDatalists, preencherFiltrosCli, renderAgenda, renderProposta, renderListaProp, renderRenovacoes, renderListaCli, renderListaProd, renderListaDesc, renderConfig]) {
     try { f(); } catch (e) {
       console.error(f.name, e);
       if (f === renderProposta) { cur = novaProposta(); salvarRascunho(); try { renderProposta(); } catch { } mostrarErro("O rascunho da proposta em edição estava inválido e foi descartado (as propostas salvas não foram afetadas).", e); }
@@ -1579,11 +1665,12 @@ async function iniciarApp(sessao) {
   try { cur = JSON.parse(localStorage.getItem(LS_RASCUNHO) || "null"); } catch { cur = null; }
   if (!cur || !cur.cliente || !Array.isArray(cur.tabelas)) cur = novaProposta();
   $$("#nav button").forEach(b => b.addEventListener("click", () => irAba(b.dataset.aba)));
-  for (const lig of [ligarProposta, ligarListaProp, ligarRenovacoes, ligarClientes, ligarProdutos, ligarDescritivos, ligarConfig]) { try { lig(); } catch (e) { console.error(e); mostrarErro("Erro ao preparar a tela (" + lig.name + ")", e); } }
+  for (const lig of [ligarAgenda, ligarProposta, ligarListaProp, ligarRenovacoes, ligarClientes, ligarProdutos, ligarDescritivos, ligarConfig]) { try { lig(); } catch (e) { console.error(e); mostrarErro("Erro ao preparar a tela (" + lig.name + ")", e); } }
   $("#btnGerar").addEventListener("click", gerarDocx);
   $("#btnSalvarProp").addEventListener("click", () => salvarProposta(false));
   $("#btnNovaProp").addEventListener("click", () => { if (!confirm("Começar uma proposta nova? (salve antes se quiser manter a atual)")) return; cur = novaProposta(); salvarRascunho(); renderProposta(); });
   renderTudo();
+  irAba("agenda");
 }
 function mostrarLogin(msg) { $("#app").style.display = "none"; $("#login").style.display = ""; $("#formLogin").style.display = ""; $("#formNovaSenha").style.display = "none"; if (msg) $("#lgMsg").textContent = msg; }
 $("#formLogin").addEventListener("submit", async e => {
