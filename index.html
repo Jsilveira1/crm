@@ -9,7 +9,7 @@
 <link rel="icon" href="icone.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icone.svg">
 <title>Propostas SKA</title>
-<link rel="stylesheet" href="estilo.css?v=202611270732">
+<link rel="stylesheet" href="estilo.css?v=202611270813">
 </head>
 <body>
 
@@ -63,6 +63,7 @@
   <div class="card"><h2>Licenças para renovar</h2><div id="agLic" class="rolar"></div></div>
   <div class="card"><h2>Propostas aguardando resposta</h2><div id="agProp" class="rolar"></div></div>
   <div class="card"><h2>Clientes com licença ativa sem contato há 90+ dias</h2><div id="agSem" class="rolar"></div></div>
+  <div class="card"><h2>Reversão — clientes com a concorrência</h2><div id="agRev" class="rolar"></div></div>
 </section>
 
 <section class="aba" id="aba-proposta">
@@ -196,6 +197,7 @@
       <select id="fcStatus"><option value="">Status: todos</option><option value="Ativo">Ativos</option><option value="Inativo">Inativos</option></select>
       <select id="fcSuporte"><option value="">Suporte: todos</option></select>
       <select id="fcNivel"><option value="">Nível: todos</option></select>
+      <select id="fcComercial"><option value="">Comercial: todos</option><option>Cliente SKA</option><option>Migrou para concorrente</option><option>Cliente de concorrente</option><option value="reverter">Para reverter (todos acima + monitorados)</option></select>
       <button class="btn" id="btnReceitaLote">Atualizar pela Receita</button>
       <button class="btn pri" id="btnNovoCli">+ Novo cliente</button>
     </div>
@@ -311,7 +313,7 @@
 <script src="libs/supabase.js"></script>
 <script src="libs/pizzip.min.js"></script>
 <script src="libs/docxtemplater.js"></script>
-<script src="config.js?v=202611270732"></script>
-<script src="app.js?v=202611270732"></script>
+<script src="config.js?v=202611270813"></script>
+<script src="app.js?v=202611270813"></script>
 </body>
 </html>
